@@ -1,0 +1,10 @@
+{
+  "description": "Secure virtual tutoring platform offering real-time classes, task tracking, quizzes, and resource management with a vibrant pastel yellow cartoon-style interface.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
