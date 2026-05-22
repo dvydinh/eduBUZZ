@@ -1,0 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,600&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Fredoka', system-ui, sans-serif;
+  --font-body: 'Nunito', system-ui, sans-serif;
+}
+
+:root {
+  --bg: #fffdf4;
+  --bg-soft: #fff6d6;
+  --ink: #4a3b12;
+  --ink-soft: #8a7742;
+  --card: #ffffff;
+  --card-line: #f2e4ad;
+  --honey: #ffcf3f;
+  --honey-deep: #f4a71d;
+  --grape: #a37bff;
+  --shadow: 20px 20px 0 rgba(244, 167, 29, 0.14);
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #211c12;
+  --bg-soft: #2c2415;
+  --ink: #fff3cc;
+  --ink-soft: #c9b483;
+  --card: #2e2717;
+  --card-line: #4a3d1e;
+  --honey: #ffcf3f;
+  --honey-deep: #ffb52e;
+  --grape: #c3a3ff;
+  --shadow: 20px 20px 0 rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.4s ease, color 0.4s ease;
+}
+
+::selection {
+  background: var(--honey);
+  color: #4a3b12;
+}
+
+/* hide scrollbars until scrolling */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ---- melting honey drip on header bottom edge ---- */
+@keyframes drip {
+  0% {
+    transform: translateY(0) scale(0.7, 1.1);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(4px) scale(1, 1);
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(26px) scale(1, 1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(46px) scale(0.6, 0.8);
+    opacity: 0;
+  }
+}
+.honey-drop {
+  transform-origin: top center;
+  animation: drip 5s ease-in infinite;
+}
+
+/* ---- living login gradient: purple/yellow/white lava wave ---- */
+@keyframes lava {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+.living-gradient {
+  background: linear-gradient(
+    120deg,
+    #b892ff,
+    #fff3c4,
+    #ffffff,
+    #ffd85e,
+    #c3a3ff,
+    #fff3c4
+  );
+  background-size: 400% 400%;
+  animation: lava 18s ease infinite;
+}
+
+/* ---- bees flying across the screen ---- */
+/* fly-a moves left→right, so flip the (left-facing) bee to face its direction */
+@keyframes fly-a {
+  0% {
+    transform: translate(-10vw, 20vh) rotate(-8deg) scaleX(-1);
+  }
+  25% {
+    transform: translate(30vw, 8vh) rotate(6deg) scaleX(-1);
+  }
+  50% {
+    transform: translate(65vw, 30vh) rotate(-10deg) scaleX(-1);
+  }
+  75% {
+    transform: translate(85vw, 12vh) rotate(4deg) scaleX(-1);
+  }
+  100% {
+    transform: translate(110vw, 26vh) rotate(-8deg) scaleX(-1);
+  }
+}
+/* fly-b moves right→left; the bee already faces left, so no flip */
+@keyframes fly-b {
+  0% {
+    transform: translate(110vw, 70vh) rotate(-8deg);
+  }
+  50% {
+    transform: translate(40vw, 55vh) rotate(6deg);
+  }
+  100% {
+    transform: translate(-15vw, 78vh) rotate(-8deg);
+  }
+}
+.bee-fly-a {
+  animation: fly-a 16s linear infinite;
+}
+.bee-fly-b {
+  animation: fly-b 22s linear infinite;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.pop {
+  animation: pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* cartoon press feedback */
+.squish {
+  transition: transform 0.14s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.14s ease;
+}
+.squish:hover {
+  transform: translateY(-3px);
+}
+.squish:active {
+  transform: translateY(2px) scale(0.97);
+}
