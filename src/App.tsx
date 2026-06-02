@@ -1,0 +1,1116 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Video,
+  VideoOff,
+  Mic,
+  MicOff,
+  MonitorUp,
+  Hand,
+  PhoneOff,
+  Lock,
+  LockOpen,
+  Send,
+  Plus,
+  X,
+  Search,
+  Download,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Bell,
+  ArrowLeft,
+  FileText,
+  CalendarDays,
+  Upload,
+  Volume2,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react'
+import { useBee } from './useBee'
+import { api } from './api'
+
+type Role = 'student' | 'tutor'
+const SAMPLE_PDF = 'https://mozilla.github.io/pdf.js/web/compressed.tracemonkey-pldi-09.pdf'
+const SAMPLE_AUDIO = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
+const SAMPLE_IMG = 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=900&h=520&fit=crop&auto=format'
+const MONTH = 'August 2026'
+
+/* --------------------------------- data ----------------------------------- */
+
+type Course = { id: string; name: string; goal: string; progress: number; students: number; color: string }
+type HW = {
+  id: number
+  courseId: string
+  title: string
+  dueDay: number
+  points: number
+  desc: string
+  kind: 'line' | 'pdf'
+  pdfUrl?: string
+  audioUrl?: string
+  imageUrl?: string
+  status: 'open' | 'submitted' | 'closed'
+  submissions: number
+  mySubmitted?: boolean
+}
+/* NOTE: `c` (correct index) is intentionally absent — answers graded server-side */
+type QQ = { id: number; courseId: string; title: string; dueDay: number; best: number | null; color: string; audioUrl?: string; imageUrl?: string; qs: { id: number; q: string; a: string[] }[] }
+type Res = { id: number; courseId: string; name: string; size: string }
+type Reminder = { id: number; day: number; label: string }
+
+/* helper: map DB snake_case to camelCase for HW */
+function mapHW(row: any): HW {
+  return {
+    id: row.id,
+    courseId: row.course_id ?? row.courseId,
+    title: row.title,
+    dueDay: row.due_day ?? row.dueDay,
+    points: row.points,
+    desc: row.description ?? row.desc ?? '',
+    kind: row.kind,
+    pdfUrl: row.pdf_url ?? row.pdfUrl,
+    audioUrl: row.audio_url ?? row.audioUrl,
+    imageUrl: row.image_url ?? row.imageUrl,
+    status: row.status,
+    submissions: row.submissions ?? 0,
+    mySubmitted: row.mySubmitted ?? false,
+  }
+}
+function mapRes(row: any): Res {
+  return { id: row.id, courseId: row.course_id ?? row.courseId, name: row.name, size: row.size }
+}
+
+/* --------------------------------- art ------------------------------------ */
+
+function Bee({ size = 44 }: { size?: number }) {
+  const src = useBee()
+  return <img src={src} alt="eduBUZZ bee" width={size} height={size} className="select-none object-contain" style={{ width: size, height: size }} draggable={false} />
+}
+function Comb({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M12 3l6 3.5v7L12 17l-6-3.5v-7L12 3z" fill="currentColor" opacity="0.9" />
+      <path d="M12 9l6 3.5v7L12 23l-6-3.5v-7L12 9z" fill="currentColor" opacity="0.55" />
+    </svg>
+  )
+}
+
+/* -------------------------------- widgets --------------------------------- */
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return <span className="rounded-full px-3 py-1 text-sm font-bold" style={{ background: 'var(--bg-soft)', color: 'var(--ink-soft)' }}>{children}</span>
+}
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <div className={`pop rounded-[28px] p-6 ${className}`} style={{ background: 'var(--card)', border: '3px solid var(--card-line)', boxShadow: 'var(--shadow)' }}>{children}</div>
+}
+function Btn({ children, onClick, tone = 'honey', className = '' }: { children: React.ReactNode; onClick?: () => void; tone?: 'honey' | 'grape' | 'ghost'; className?: string }) {
+  const tones: Record<string, React.CSSProperties> = {
+    honey: { background: 'var(--honey)', color: '#4a3b12', border: '3px solid #4a3b12' },
+    grape: { background: 'var(--grape)', color: '#fff', border: '3px solid #4a3b12' },
+    ghost: { background: 'transparent', color: 'var(--ink)', border: '3px solid var(--card-line)' },
+  }
+  return <button onClick={onClick} className={`squish inline-flex items-center gap-2 rounded-full px-6 py-3 font-extrabold ${className}`} style={{ fontFamily: 'var(--font-display)', ...tones[tone] }}>{children}</button>
+}
+function Modal({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-6" style={{ background: 'rgba(74,59,18,0.45)' }} onClick={onClose}>
+      <div className={`pop w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} rounded-[32px] p-8`} onClick={(e) => e.stopPropagation()} style={{ background: 'var(--card)', border: '4px solid #4a3b12', boxShadow: '0 16px 0 rgba(74,59,18,0.2)' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+const inputCls = 'w-full rounded-2xl px-5 py-3 font-bold outline-none'
+const inputStyle: React.CSSProperties = { border: '3px solid var(--card-line)', background: 'var(--bg)', color: 'var(--ink)' }
+const dueLabel = (d: number) => `Aug ${d}`
+
+// Optional image + audio attachments, rendered only when present.
+function Media({ imageUrl, audioUrl }: { imageUrl?: string; audioUrl?: string }) {
+  if (!imageUrl && !audioUrl) return null
+  return (
+    <div className="mb-4 space-y-3">
+      {imageUrl && (
+        <img src={imageUrl} alt="Attachment" className="w-full rounded-2xl object-cover" style={{ maxHeight: 260, border: '3px solid var(--card-line)', background: 'var(--bg-soft)' }} />
+      )}
+      {audioUrl && (
+        <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: 'var(--bg-soft)', border: '3px solid var(--card-line)' }}>
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '2px solid #4a3b12', color: '#4a3b12' }}>
+            <Volume2 size={18} strokeWidth={2.6} />
+          </span>
+          <audio controls src={audioUrl} className="w-full" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// File picker → object URL, so attachments render/play inline (no download).
+function FilePick({ accept, label, value, onPick, sample }: { accept: string; label: string; value: string; onPick: (url: string) => void; sample?: string }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const [chosen, setChosen] = useState('')
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl p-3" style={{ background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
+      <input
+        ref={ref}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) {
+            onPick(URL.createObjectURL(f))
+            setChosen(f.name)
+          }
+        }}
+      />
+      <Btn tone="ghost" onClick={() => ref.current?.click()}>
+        <Upload size={18} /> {label}
+      </Btn>
+      <span className="min-w-0 flex-1 truncate font-bold" style={{ color: value ? 'var(--ink)' : 'var(--ink-soft)' }}>
+        {chosen || (value ? 'Attached' : 'None')}
+      </span>
+      {sample && (
+        <button
+          onClick={() => {
+            onPick(sample)
+            setChosen('Sample')
+          }}
+          className="squish text-sm font-extrabold underline"
+          style={{ fontFamily: 'var(--font-display)', color: 'var(--honey-deep)' }}
+        >
+          use sample
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Optional image + audio pickers for add-forms.
+function MediaInputs({ img, audio, setImg, setAudio }: { img: string; audio: string; setImg: (v: string) => void; setAudio: (v: string) => void }) {
+  return (
+    <>
+      <FilePick accept="image/*" label="Add image" value={img} onPick={setImg} sample={SAMPLE_IMG} />
+      <FilePick accept="audio/*" label="Add audio" value={audio} onPick={setAudio} sample={SAMPLE_AUDIO} />
+    </>
+  )
+}
+
+function IconToggle({ on, onIcon: On, offIcon: Off, label, onClick, danger }: { on: boolean; onIcon: typeof Mic; offIcon: typeof Mic; label: string; onClick: () => void; danger?: boolean }) {
+  const Icon = on ? On : Off
+  return (
+    <button onClick={onClick} className="squish flex flex-col items-center gap-1">
+      <span className="grid h-14 w-14 place-items-center rounded-full" style={{ background: danger ? '#ff9db0' : on ? 'var(--honey)' : 'var(--bg-soft)', border: '3px solid #4a3b12', color: '#4a3b12' }}>
+        <Icon size={24} strokeWidth={2.6} />
+      </span>
+      <span className="text-xs font-extrabold" style={{ color: 'var(--ink-soft)' }}>{label}</span>
+    </button>
+  )
+}
+
+/* --------------------------------- login ---------------------------------- */
+
+function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
+  const [mode, setMode] = useState<'guest' | 'signin' | 'signup'>('guest')
+  const [role, setRole] = useState<Role>('student')
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [shake, setShake] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const ok = () => (mode === 'signin' ? email.trim() && code.trim().length >= 4 : mode === 'signup' ? name.trim() && email.trim() && code.trim().length >= 4 : name.trim() && code.trim().length >= 4)
+  const submit = async () => {
+    if (!ok()) {
+      setShake(true)
+      setTimeout(() => setShake(false), 500)
+      return
+    }
+    setLoading(true)
+    setErr('')
+    try {
+      if (mode === 'signin') {
+        const res = await api.auth.login({ email: email.trim(), password: code })
+        onEnter(res.name, res.role as Role)
+      } else if (mode === 'signup') {
+        const res = await api.auth.signup({ name: name.trim(), email: email.trim(), password: code, role })
+        onEnter(res.name, res.role as Role)
+      } else {
+        const res = await api.auth.guest({ name: name.trim(), passcode: code, role })
+        onEnter(res.name, res.role as Role)
+      }
+    } catch (e: any) {
+      setErr(e.message || 'Something went wrong')
+      setShake(true)
+      setTimeout(() => setShake(false), 500)
+    } finally {
+      setLoading(false)
+    }
+  }
+  const demoLogin = async (demoRole: Role) => {
+    setLoading(true)
+    setErr('')
+    try {
+      const res = await api.auth.login({
+        email: demoRole === 'student' ? 'student@edubuzz.app' : 'tutor@edubuzz.app',
+        password: 'demo1234',
+      })
+      onEnter(res.name, res.role as Role)
+    } catch (e: any) {
+      setErr(e.message || 'Demo login failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+  const tab = (m: typeof mode, label: string) => (
+    <button onClick={() => setMode(m)} className="squish flex-1 rounded-full px-3 py-2 text-sm font-bold" style={{ fontFamily: 'var(--font-display)', background: mode === m ? '#ffcf3f' : 'transparent', color: '#4a3b12', border: mode === m ? '3px solid #4a3b12' : '3px solid transparent' }}>{label}</button>
+  )
+  const roleBtn = (r: Role, label: string) => (
+    <button onClick={() => setRole(r)} className="squish flex-1 rounded-2xl px-3 py-3 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: role === r ? '#a37bff' : '#fffdf4', color: role === r ? '#fff' : '#4a3b12', border: '3px solid #4a3b12' }}>{label}</button>
+  )
+  const li: React.CSSProperties = { border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }
+  return (
+    <div className="living-gradient relative flex min-h-screen items-center justify-center overflow-hidden p-6">
+      <div className="bee-fly-a pointer-events-none absolute left-0 top-0"><Bee size={64} /></div>
+      <div className="bee-fly-b pointer-events-none absolute left-0 top-0" style={{ animationDelay: '4s' }}><Bee size={48} /></div>
+      <div className="pop relative z-10 w-full max-w-md rounded-[36px] p-9 text-center" style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(14px)', border: '4px solid #4a3b12', boxShadow: '0 18px 0 rgba(74,59,18,0.18)', animation: shake ? 'pop 0.1s 3 alternate' : undefined }}>
+        <div className="mb-1 flex justify-center"><Bee size={64} /></div>
+        <h1 className="text-5xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: '#4a3b12' }}>edu<span style={{ color: '#f4a71d' }}>BUZZ</span></h1>
+        <p className="mb-5 mt-1 text-lg font-bold" style={{ color: '#8a7742' }}>{mode === 'guest' ? 'buzz in with your passcode' : mode === 'signin' ? 'welcome back!' : 'join the hive'}</p>
+        <div className="mb-4 flex gap-3">{roleBtn('student', "I’m a Student")}{roleBtn('tutor', "I’m a Tutor")}</div>
+        <div className="mb-6 flex rounded-full p-1" style={{ background: '#fff6d6', border: '3px solid #4a3b12' }}>{tab('guest', 'Guest')}{tab('signin', 'Sign in')}{tab('signup', 'Sign up')}</div>
+        {err && <p className="mb-3 rounded-2xl px-4 py-2 text-sm font-extrabold" style={{ background: '#ffd6de', color: '#c25a6a' }}>{err}</p>}
+        <div className="space-y-4 text-left">
+          {mode !== 'signin' && <input className={inputCls} style={li} placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} />}
+          {mode !== 'guest' && <input className={inputCls} style={li} type="email" placeholder="you@hive.com" value={email} onChange={(e) => setEmail(e.target.value)} />}
+          <input className={inputCls} style={li} type="password" placeholder={mode === 'guest' ? 'Course passcode' : 'Password'} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        </div>
+        <div className="mt-7 space-y-3">
+          <Btn onClick={submit}>{loading ? 'Loading…' : mode === 'signin' ? 'Sign in →' : mode === 'signup' ? 'Create account →' : 'Let me in →'}</Btn>
+          <div className="flex justify-center gap-2">
+            <button onClick={() => demoLogin('student')} disabled={loading} className="squish rounded-full px-4 py-2 text-sm font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#ffcf3f', color: '#4a3b12', border: '3px solid #4a3b12' }}>🐝 Demo student</button>
+            <button onClick={() => demoLogin('tutor')} disabled={loading} className="squish rounded-full px-4 py-2 text-sm font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#a37bff', color: '#fff', border: '3px solid #4a3b12' }}>🎓 Demo tutor</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------- honey edge ------------------------------- */
+
+function HoneyEdge() {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-full h-24 overflow-hidden">
+      <svg className="absolute inset-x-0 top-[-2px] w-full" height="70" viewBox="0 0 1200 70" preserveAspectRatio="none">
+        <path d="M0 0 H1200 V16 C1160 16 1150 54 1120 54 C1090 54 1082 16 1050 16 C1000 16 995 40 965 40 C935 40 930 16 890 16 C840 16 838 62 800 62 C762 62 760 16 715 16 C665 16 662 44 630 44 C598 44 596 16 550 16 C500 16 498 52 462 52 C426 52 424 16 380 16 C330 16 328 42 296 42 C264 42 262 16 220 16 C168 16 166 58 128 58 C90 58 88 16 48 16 C24 16 18 30 0 30 Z" fill="var(--honey)" />
+      </svg>
+      {[{ x: '11%', d: 0 }, { x: '38%', d: 1.2 }, { x: '66%', d: 0.6 }, { x: '88%', d: 1.8 }].map((p) => (
+        <span key={p.x} className="honey-drop absolute top-[42px]" style={{ left: p.x, width: 14, height: 14, borderRadius: '50% 50% 55% 55%', background: 'var(--honey)', animationDelay: `${p.d}s` }} />
+      ))}
+    </div>
+  )
+}
+
+/* -------------------------------- Meeting --------------------------------- */
+
+function Meeting({ isTutor, name }: { isTutor: boolean; name: string }) {
+  const [cam, setCam] = useState(true)
+  const [mic, setMic] = useState(true)
+  const [locked, setLocked] = useState(false)
+  const [share, setShare] = useState(false)
+  const [hand, setHand] = useState(false)
+  const [left, setLeft] = useState(false)
+  const [seats, setSeats] = useState([{ n: 'Maya', muted: false }, { n: 'Leo', muted: true }, { n: 'Ivy', muted: false }, { n: name, muted: false }])
+  const [chat, setChat] = useState([{ who: 'Maya', msg: 'ready! 🐝' }, { who: 'Leo', msg: 'can you share the slides?' }])
+  const [draft, setDraft] = useState('')
+  const wrap = useRef<HTMLDivElement>(null)
+  const [full, setFull] = useState(false)
+  useEffect(() => {
+    const onChange = () => setFull(document.fullscreenElement === wrap.current)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+  const toggleFull = () => {
+    if (document.fullscreenElement) document.exitFullscreen()
+    else wrap.current?.requestFullscreen?.()
+  }
+  const send = () => {
+    if (!draft.trim()) return
+    setChat((c) => [...c, { who: name, msg: draft.trim() }])
+    setDraft('')
+  }
+  const toggleMute = (n2: string) => setSeats((s) => s.map((p) => (p.n === n2 ? { ...p, muted: !p.muted } : p)))
+  if (left)
+    return (
+      <Card className="text-center">
+        <div className="mb-3 flex justify-center"><Bee size={80} /></div>
+        <h3 className="mb-4 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>You left the meeting</h3>
+        <Btn onClick={() => setLeft(false)}>Re-join</Btn>
+      </Card>
+    )
+  return (
+    <div ref={wrap} className={`grid gap-6 lg:grid-cols-[1.6fr_1fr] ${full ? 'overflow-y-auto p-6' : ''}`} style={full ? { background: 'var(--bg)' } : undefined}>
+      <Card>
+        <div className="mb-2 flex items-center justify-between">
+          <Pill>{isTutor ? 'You are the host' : 'Live session'}</Pill>
+          <div className="flex items-center gap-3">
+            {locked && <span className="flex items-center gap-1 text-sm font-extrabold" style={{ color: 'var(--honey-deep)' }}><Lock size={16} /> Locked</span>}
+            <button onClick={toggleFull} className="squish grid h-9 w-9 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink)' }} title={full ? 'Exit full screen' : 'Full screen'}>
+              {full ? <Minimize2 size={16} strokeWidth={2.6} /> : <Maximize2 size={16} strokeWidth={2.6} />}
+            </button>
+          </div>
+        </div>
+        <div className="mb-5 grid place-items-center rounded-[22px] text-center" style={{ minHeight: 260, background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
+          <div>
+            <div className="mb-2 flex justify-center">{share ? <MonitorUp size={64} strokeWidth={2.2} color="var(--honey-deep)" /> : cam ? <Bee size={72} /> : <VideoOff size={64} strokeWidth={2.2} color="var(--ink-soft)" />}</div>
+            <p className="text-2xl font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>{share ? 'Screen sharing' : cam ? 'Camera on' : 'Camera off'}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap justify-center gap-5">
+          <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Camera" onClick={() => setCam((v) => !v)} />
+          <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={() => setMic((v) => !v)} />
+          <IconToggle on={share} onIcon={MonitorUp} offIcon={MonitorUp} label="Share" onClick={() => setShare((v) => !v)} />
+          {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => setHand((v) => !v)} />}
+          <IconToggle on={false} onIcon={PhoneOff} offIcon={PhoneOff} label="Leave" onClick={() => setLeft(true)} danger />
+        </div>
+      </Card>
+      <div className="space-y-6">
+        <Card>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{isTutor ? 'Host controls' : 'In the room'}</h3>
+            <Pill>{seats.length} here</Pill>
+          </div>
+          <div className="mb-4 space-y-2">
+            {seats.map((s) => (
+              <div key={s.n} className="flex items-center justify-between rounded-2xl px-4 py-2.5" style={{ background: 'var(--bg-soft)' }}>
+                <span className="font-extrabold">{s.n}</span>
+                {isTutor ? (
+                  <button onClick={() => toggleMute(s.n)} className="squish grid h-9 w-9 place-items-center rounded-full" style={{ background: s.muted ? '#ff9db0' : 'var(--honey)', border: '2px solid #4a3b12', color: '#4a3b12' }}>{s.muted ? <MicOff size={16} strokeWidth={2.6} /> : <Mic size={16} strokeWidth={2.6} />}</button>
+                ) : (
+                  <span style={{ color: 'var(--ink-soft)' }}>{s.muted ? <MicOff size={18} /> : <Mic size={18} />}</span>
+                )}
+              </div>
+            ))}
+          </div>
+          {isTutor && <Btn tone={locked ? 'grape' : 'honey'} onClick={() => setLocked((v) => !v)}>{locked ? <LockOpen size={18} /> : <Lock size={18} />}{locked ? 'Unlock room' : 'Lock room'}</Btn>}
+        </Card>
+        <Card>
+          <h3 className="mb-3 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Chat</h3>
+          <div className="mb-3 max-h-40 space-y-2 overflow-y-auto">{chat.map((c, i) => <p key={i} className="text-sm font-bold"><span style={{ color: 'var(--honey-deep)' }}>{c.who}:</span> <span style={{ color: 'var(--ink)' }}>{c.msg}</span></p>)}</div>
+          <div className="flex gap-2">
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Say hi…" className="w-full rounded-full px-4 py-2 font-bold outline-none" style={inputStyle} />
+            <button onClick={send} className="squish grid h-11 w-11 shrink-0 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Send size={18} strokeWidth={2.6} /></button>
+          </div>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------- Resources -------------------------------- */
+
+function Resources({ isTutor, courseId, list, setList }: { isTutor: boolean; courseId: string; list: Res[]; setList: React.Dispatch<React.SetStateAction<Res[]>> }) {
+  const [q, setQ] = useState('')
+  const shown = list.filter((f) => f.courseId === courseId && f.name.toLowerCase().includes(q.toLowerCase()))
+  const upload = async () => {
+    const n = prompt('File name?')
+    if (n) {
+      try {
+        const res = await api.resources.create(courseId, { name: n })
+        setList((f) => [mapRes(res), ...f])
+      } catch { /* ignore */ }
+    }
+  }
+  const removeRes = async (id: number) => {
+    try {
+      await api.resources.remove(id)
+      setList((l) => l.filter((x) => x.id !== id))
+    } catch { /* ignore */ }
+  }
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[200px] flex-1">
+          <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2" color="var(--ink-soft)" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search materials…" className="w-full rounded-full py-3 pl-12 pr-5 font-bold outline-none" style={{ border: '3px solid var(--card-line)', background: 'var(--card)', color: 'var(--ink)' }} />
+        </div>
+        {isTutor && <Btn onClick={upload}><Plus size={18} /> Upload</Btn>}
+      </div>
+      <div className="grid gap-6 md:grid-cols-2">
+        {shown.map((f) => (
+          <Card key={f.id} className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="grid h-11 w-11 place-items-center rounded-2xl" style={{ background: 'var(--bg-soft)', border: '3px solid var(--card-line)' }}><Comb size={22} /></div>
+              <div><p className="font-extrabold">{f.name}</p><p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{f.size}</p></div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => alert('Downloading ' + f.name)} className="squish grid h-10 w-10 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Download size={18} strokeWidth={2.6} /></button>
+              {isTutor && <button onClick={() => removeRes(f.id)} className="squish grid h-10 w-10 place-items-center rounded-full" style={{ background: '#ff9db0', border: '3px solid #4a3b12', color: '#4a3b12' }}><Trash2 size={18} strokeWidth={2.6} /></button>}
+            </div>
+          </Card>
+        ))}
+        {shown.length === 0 && <Card className="text-center font-extrabold md:col-span-2"><span style={{ color: 'var(--ink-soft)' }}>No materials yet</span></Card>}
+      </div>
+    </div>
+  )
+}
+
+/* -------------------------------- Homework -------------------------------- */
+
+const hwBadge: Record<HW['status'], { bg: string; label: string }> = {
+  open: { bg: '#fff6d6', label: 'Open' },
+  submitted: { bg: '#c9f0c9', label: '✓ Submitted' },
+  closed: { bg: '#ffd6de', label: '🔒 Closed' },
+}
+
+// File-browse submit box — student picks a file, then submits.
+function SubmitBox({ onSubmit }: { onSubmit: () => void }) {
+  const [file, setFile] = useState<string | null>(null)
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <div className="space-y-3">
+      <input ref={ref} type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0]?.name ?? null)} />
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl p-4" style={{ background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
+        <Btn tone="ghost" onClick={() => ref.current?.click()}><Upload size={18} /> Browse…</Btn>
+        <span className="truncate font-bold" style={{ color: file ? 'var(--ink)' : 'var(--ink-soft)' }}>{file ?? 'No file chosen'}</span>
+      </div>
+      <Btn onClick={onSubmit}>Submit work</Btn>
+    </div>
+  )
+}
+
+// Shared detail body (task + optional PDF + role actions).
+function HwActions({ cur, isTutor, onSubmit, onToggleClose, onDelete }: { cur: HW; isTutor: boolean; onSubmit: () => void; onToggleClose: () => void; onDelete: () => void }) {
+  if (isTutor)
+    return (
+      <div className="space-y-3">
+        <div className="rounded-2xl p-4 text-center" style={{ background: 'var(--bg-soft)' }}>
+          <p className="text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--honey-deep)' }}>{cur.submissions}</p>
+          <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>submissions received</p>
+        </div>
+        <div className="flex gap-3">
+          <Btn onClick={onToggleClose}>{cur.status === 'closed' ? 'Reopen' : 'Close now'}</Btn>
+          <Btn tone="ghost" onClick={onDelete}><Trash2 size={18} /> Delete</Btn>
+        </div>
+      </div>
+    )
+  if (cur.status === 'open' && !cur.mySubmitted) return <SubmitBox onSubmit={onSubmit} />
+  if (cur.status === 'submitted' || cur.mySubmitted) return <p className="font-extrabold" style={{ color: '#3a8a3a' }}>✓ You have submitted this. Nice!</p>
+  return <p className="font-extrabold" style={{ color: '#c25a6a' }}>🔒 Deadline passed — submissions locked.</p>
+}
+
+// Full-screen PDF homework page.
+function HomeworkFull({ cur, isTutor, back, onSubmit, onToggleClose, onDelete }: { cur: HW; isTutor: boolean; back: () => void; onSubmit: () => void; onToggleClose: () => void; onDelete: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: 'var(--bg)' }}>
+      <div className="mx-auto max-w-5xl px-6 py-6">
+        <button onClick={back} className="squish mb-4 inline-flex items-center gap-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>
+          <ArrowLeft size={20} strokeWidth={2.6} /> Back to homework
+        </button>
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-lg" style={{ background: '#ffd6de', border: '2px solid #4a3b12', color: '#4a3b12' }}><FileText size={18} strokeWidth={2.6} /></span>
+          <h2 className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{cur.title}</h2>
+          <span className="rounded-full px-3 py-0.5 text-sm font-extrabold" style={{ background: hwBadge[cur.status].bg, color: '#4a3b12' }}>{hwBadge[cur.status].label}</span>
+        </div>
+        <p className="mb-4 font-bold" style={{ color: 'var(--ink-soft)' }}>Due {dueLabel(cur.dueDay)} · {cur.points} points</p>
+        <div className="grid gap-6 lg:grid-cols-[1.8fr_1fr]">
+          <div className="overflow-hidden rounded-[24px]" style={{ border: '3px solid var(--card-line)', background: '#fff' }}>
+            {cur.pdfUrl && <iframe src={`${cur.pdfUrl}#navpanes=0`} title="Homework PDF" className="w-full" style={{ height: '80vh', border: 'none' }} />}
+          </div>
+          <div className="space-y-5">
+            <Card>
+              <h3 className="mb-2 text-xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>The task</h3>
+              <p className="mb-3 font-bold" style={{ color: 'var(--ink)' }}>{cur.desc}</p>
+              <Media imageUrl={cur.imageUrl} audioUrl={cur.audioUrl} />
+            </Card>
+            <Card>
+              <HwActions cur={cur} isTutor={isTutor} onSubmit={onSubmit} onToggleClose={onToggleClose} onDelete={onDelete} />
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Homework({ isTutor, courseId, list, setList }: { isTutor: boolean; courseId: string; list: HW[]; setList: React.Dispatch<React.SetStateAction<HW[]>> }) {
+  const items = list.filter((h) => h.courseId === courseId)
+  const [openId, setOpenId] = useState<number | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ title: '', dueDay: '9', points: '10', desc: '', pdfUrl: '', imageUrl: '', audioUrl: '' })
+  const cur = openId != null ? list.find((h) => h.id === openId) ?? null : null
+
+  const submit = async (id: number) => {
+    try {
+      await api.homework.submit(id)
+      setList((l) => l.map((h) => (h.id === id ? { ...h, mySubmitted: true, submissions: h.submissions + 1 } : h)))
+      setOpenId(null)
+    } catch { /* ignore */ }
+  }
+  const toggleClose = async (id: number) => {
+    try {
+      const res = await api.homework.toggleClose(id)
+      setList((l) => l.map((x) => (x.id === id ? { ...x, status: res.status } : x)))
+      setOpenId(null)
+    } catch { /* ignore */ }
+  }
+  const del = async (id: number) => {
+    try {
+      await api.homework.remove(id)
+      setList((l) => l.filter((x) => x.id !== id))
+      setOpenId(null)
+    } catch { /* ignore */ }
+  }
+  const add = async () => {
+    if (!form.title.trim()) return
+    const pdf = form.pdfUrl.trim()
+    try {
+      const res = await api.homework.create(courseId, {
+        title: form.title,
+        dueDay: Number(form.dueDay) || 1,
+        points: Number(form.points) || 0,
+        desc: form.desc,
+        kind: pdf ? 'pdf' : 'line',
+        pdfUrl: pdf || undefined,
+        imageUrl: form.imageUrl.trim() || undefined,
+        audioUrl: form.audioUrl.trim() || undefined,
+      })
+      setList((l) => [...l, mapHW(res)])
+      setForm({ title: '', dueDay: '9', points: '10', desc: '', pdfUrl: '', imageUrl: '', audioUrl: '' })
+      setAdding(false)
+    } catch { /* ignore */ }
+  }
+  const badge = hwBadge
+
+  if (cur && cur.kind === 'pdf')
+    return <HomeworkFull cur={cur} isTutor={isTutor} back={() => setOpenId(null)} onSubmit={() => submit(cur.id)} onToggleClose={() => toggleClose(cur.id)} onDelete={() => del(cur.id)} />
+
+  return (
+    <div className="space-y-4">
+      {isTutor && <div className="flex justify-end"><Btn onClick={() => setAdding(true)}><Plus size={18} /> Add homework</Btn></div>}
+      {items.map((h) => (
+        <div key={h.id} className="squish pop cursor-pointer rounded-[28px] p-6" onClick={() => setOpenId(h.id)} style={{ background: 'var(--card)', border: '3px solid var(--card-line)', boxShadow: 'var(--shadow)' }}>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="mb-1 flex items-center gap-3">
+                {h.kind === 'pdf' && <span className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: '#ffd6de', border: '2px solid #4a3b12', color: '#4a3b12' }}><FileText size={16} strokeWidth={2.6} /></span>}
+                <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{h.title}</h3>
+                <span className="rounded-full px-3 py-0.5 text-sm font-extrabold" style={{ background: badge[h.status].bg, color: '#4a3b12' }}>{badge[h.status].label}</span>
+              </div>
+              <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>Due {dueLabel(h.dueDay)} · {h.points} pts · {h.kind === 'pdf' ? 'PDF task' : 'Task'} {isTutor && `· ${h.submissions} submitted`}</p>
+            </div>
+            <span className="text-sm font-extrabold" style={{ color: 'var(--honey-deep)' }}>Open →</span>
+          </div>
+        </div>
+      ))}
+      {items.length === 0 && <Card className="text-center font-extrabold"><span style={{ color: 'var(--ink-soft)' }}>No homework yet</span></Card>}
+
+      {cur && (
+        <Modal onClose={() => setOpenId(null)}>
+          <div className="mb-2 flex items-center gap-3">
+            <h3 className="text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{cur.title}</h3>
+            <span className="rounded-full px-3 py-0.5 text-sm font-extrabold" style={{ background: badge[cur.status].bg, color: '#4a3b12' }}>{badge[cur.status].label}</span>
+          </div>
+          <p className="mb-4 font-bold" style={{ color: 'var(--ink-soft)' }}>Due {dueLabel(cur.dueDay)} · {cur.points} points</p>
+          <div className="mb-4 rounded-2xl p-4 font-bold" style={{ background: 'var(--bg-soft)', color: 'var(--ink)' }}>{cur.desc}</div>
+          <Media imageUrl={cur.imageUrl} audioUrl={cur.audioUrl} />
+          <HwActions cur={cur} isTutor={isTutor} onSubmit={() => submit(cur.id)} onToggleClose={() => toggleClose(cur.id)} onDelete={() => del(cur.id)} />
+        </Modal>
+      )}
+
+      {adding && (
+        <Modal onClose={() => setAdding(false)}>
+          <h3 className="mb-1 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>New homework</h3>
+          <p className="mb-5 font-bold" style={{ color: 'var(--ink-soft)' }}>Leave the PDF link blank for a simple task line.</p>
+          <div className="space-y-4">
+            <input className={inputCls} style={inputStyle} placeholder="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            <div className="flex gap-3">
+              <input className={inputCls} style={inputStyle} type="number" placeholder="Due day (Aug)" value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: e.target.value })} />
+              <input className={inputCls} style={inputStyle} type="number" placeholder="Points" value={form.points} onChange={(e) => setForm({ ...form, points: e.target.value })} />
+            </div>
+            <textarea className={inputCls} style={{ ...inputStyle, minHeight: 90 }} placeholder="Instructions…" value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} />
+            <FilePick accept="application/pdf" label="Attach PDF" value={form.pdfUrl} onPick={(v) => setForm({ ...form, pdfUrl: v })} sample={SAMPLE_PDF} />
+            <MediaInputs img={form.imageUrl} audio={form.audioUrl} setImg={(v) => setForm({ ...form, imageUrl: v })} setAudio={(v) => setForm({ ...form, audioUrl: v })} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={add}>Post</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+/* -------------------------------- Quizzes --------------------------------- */
+
+function QuizPlayer({ quiz, onExit, onScore }: { quiz: QQ; onExit: () => void; onScore: (pct: number) => void }) {
+  const [i, setI] = useState(0)
+  const [picked, setPicked] = useState<number | null>(null)
+  const [correctIdx, setCorrectIdx] = useState<number | null>(null)
+  const [score, setScore] = useState(0)
+  const [done, setDone] = useState(false)
+  const [grading, setGrading] = useState(false)
+  const cur = quiz.qs[i]
+  const choose = async (idx: number) => {
+    if (picked != null || grading) return
+    setPicked(idx)
+    setGrading(true)
+    try {
+      /* Server grades the answer — correct_index never existed on client */
+      const res = await api.quizzes.answer(quiz.id, cur.id, idx)
+      setCorrectIdx(res.correctIndex)
+      if (res.correct) setScore((s) => s + 1)
+    } catch {
+      /* If grading fails, treat as wrong */
+    } finally {
+      setGrading(false)
+    }
+  }
+  const next = async () => {
+    if (i + 1 < quiz.qs.length) {
+      setI(i + 1)
+      setPicked(null)
+      setCorrectIdx(null)
+    } else {
+      const pct = Math.round((score / quiz.qs.length) * 100)
+      setDone(true)
+      try {
+        const res = await api.quizzes.finish(quiz.id, pct)
+        onScore(res.best)
+      } catch {
+        onScore(pct)
+      }
+    }
+  }
+  return (
+    <Modal onClose={onExit}>
+      {done ? (
+        <div className="text-center">
+          <Bee size={80} />
+          <h3 className="mt-2 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{Math.round((score / quiz.qs.length) * 100)}%</h3>
+          <p className="mb-6 font-bold" style={{ color: 'var(--ink-soft)' }}>{score} / {quiz.qs.length} correct — sweet work!</p>
+          <Btn onClick={onExit}>Back to quizzes</Btn>
+        </div>
+      ) : (
+        <>
+          <div className="mb-4 flex items-center justify-between"><Pill>Question {i + 1} / {quiz.qs.length}</Pill><button onClick={onExit} style={{ color: 'var(--ink-soft)' }}><X size={22} strokeWidth={2.6} /></button></div>
+          <Media imageUrl={quiz.imageUrl} audioUrl={quiz.audioUrl} />
+          <h3 className="mb-6 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{cur.q}</h3>
+          <div className="space-y-3">
+            {cur.a.map((opt, idx) => {
+              const isCorrect = correctIdx != null && idx === correctIdx
+              const chosen = picked === idx
+              let bg = 'var(--bg-soft)'
+              if (picked != null && isCorrect) bg = '#c9f0c9'
+              else if (chosen) bg = '#ffd6de'
+              return <button key={opt} onClick={() => choose(idx)} className="squish w-full rounded-2xl px-5 py-3 text-left font-extrabold" style={{ background: bg, border: '3px solid #4a3b12', color: '#4a3b12' }}>{opt}{grading && chosen ? ' …' : ''}</button>
+            })}
+          </div>
+          {picked != null && !grading && <div className="mt-6"><Btn onClick={next}>{i + 1 < quiz.qs.length ? 'Next →' : 'See score'}</Btn></div>}
+        </>
+      )}
+    </Modal>
+  )
+}
+
+function Quizzes({ isTutor, courseId, list, setList }: { isTutor: boolean; courseId: string; list: QQ[]; setList: React.Dispatch<React.SetStateAction<QQ[]>> }) {
+  const items = list.filter((q) => q.courseId === courseId)
+  const [active, setActive] = useState<QQ | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ n: '', dueDay: '15', audioUrl: '', imageUrl: '', q: '', a1: '', a2: '', a3: '' })
+  const add = async () => {
+    if (!form.n.trim() || !form.q.trim()) return
+    try {
+      const res = await api.quizzes.create(courseId, {
+        title: form.n,
+        dueDay: Number(form.dueDay) || 1,
+        color: '#a37bff',
+        imageUrl: form.imageUrl.trim() || undefined,
+        audioUrl: form.audioUrl.trim() || undefined,
+        questions: [{ q: form.q, a: [form.a1 || 'A', form.a2 || 'B', form.a3 || 'C'], c: 0 }],
+      })
+      setList((l) => [...l, res])
+      setForm({ n: '', dueDay: '15', audioUrl: '', imageUrl: '', q: '', a1: '', a2: '', a3: '' })
+      setAdding(false)
+    } catch { /* ignore */ }
+  }
+  const removeQuiz = async (id: number) => {
+    try {
+      await api.quizzes.remove(id)
+      setList((l) => l.filter((x) => x.id !== id))
+    } catch { /* ignore */ }
+  }
+  const saveScore = (id: number, pct: number) => setList((l) => l.map((q) => (q.id === id ? { ...q, best: Math.max(pct, q.best ?? 0) } : q)))
+  return (
+    <>
+      {isTutor && <div className="mb-4 flex justify-end"><Btn onClick={() => setAdding(true)}><Plus size={18} /> Add quiz</Btn></div>}
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {items.map((q) => (
+          <Card key={q.id}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Pill>{q.qs.length} questions</Pill>
+                {q.audioUrl && <span className="grid h-7 w-7 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}><Volume2 size={14} strokeWidth={2.6} /></span>}
+                {q.imageUrl && <span className="grid h-7 w-7 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}><FileText size={14} strokeWidth={2.6} /></span>}
+              </div>
+              {q.best != null && <span className="font-extrabold" style={{ color: 'var(--honey-deep)' }}>Best {q.best}%</span>}
+            </div>
+            <div className="mb-4 h-2 w-full rounded-full" style={{ background: q.color }} />
+            <h3 className="mb-1 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{q.title}</h3>
+            <p className="mb-4 text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>Due {dueLabel(q.dueDay)}</p>
+            <div className="flex gap-2">
+              <Btn tone={q.best == null ? 'grape' : 'honey'} onClick={() => setActive(q)}>{isTutor ? 'Preview' : q.best == null ? 'Start quiz' : 'Retry'}</Btn>
+              {isTutor && <Btn tone="ghost" onClick={() => removeQuiz(q.id)}><Trash2 size={18} /></Btn>}
+            </div>
+          </Card>
+        ))}
+        {items.length === 0 && <Card className="text-center font-extrabold"><span style={{ color: 'var(--ink-soft)' }}>No quizzes yet</span></Card>}
+      </div>
+      {active && <QuizPlayer quiz={active} onExit={() => setActive(null)} onScore={(pct) => saveScore(active.id, pct)} />}
+      {adding && (
+        <Modal onClose={() => setAdding(false)}>
+          <h3 className="mb-5 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>New quiz</h3>
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <input className={inputCls} style={inputStyle} placeholder="Quiz title" value={form.n} onChange={(e) => setForm({ ...form, n: e.target.value })} />
+              <input className={inputCls} style={inputStyle} type="number" placeholder="Due day" value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: e.target.value })} />
+            </div>
+            <MediaInputs img={form.imageUrl} audio={form.audioUrl} setImg={(v) => setForm({ ...form, imageUrl: v })} setAudio={(v) => setForm({ ...form, audioUrl: v })} />
+            <input className={inputCls} style={inputStyle} placeholder="First question" value={form.q} onChange={(e) => setForm({ ...form, q: e.target.value })} />
+            <p className="text-sm font-extrabold" style={{ color: 'var(--ink-soft)' }}>Answers (first is correct)</p>
+            <input className={inputCls} style={inputStyle} placeholder="Correct answer" value={form.a1} onChange={(e) => setForm({ ...form, a1: e.target.value })} />
+            <input className={inputCls} style={inputStyle} placeholder="Wrong answer" value={form.a2} onChange={(e) => setForm({ ...form, a2: e.target.value })} />
+            <input className={inputCls} style={inputStyle} placeholder="Wrong answer" value={form.a3} onChange={(e) => setForm({ ...form, a3: e.target.value })} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={add}>Create</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+/* ---------------------------- Course workspace ---------------------------- */
+
+const subTabs = ['Meeting', 'Homework', 'Quizzes', 'Resources'] as const
+type Sub = (typeof subTabs)[number]
+
+function CourseWorkspace({
+  course,
+  isTutor,
+  name,
+  back,
+  hw,
+  setHw,
+  quizzes,
+  setQuizzes,
+  resources,
+  setResources,
+}: {
+  course: Course
+  isTutor: boolean
+  name: string
+  back: () => void
+  hw: HW[]
+  setHw: React.Dispatch<React.SetStateAction<HW[]>>
+  quizzes: QQ[]
+  setQuizzes: React.Dispatch<React.SetStateAction<QQ[]>>
+  resources: Res[]
+  setResources: React.Dispatch<React.SetStateAction<Res[]>>
+}) {
+  const [sub, setSub] = useState<Sub>('Meeting')
+  return (
+    <div>
+      <button onClick={back} className="squish mb-4 inline-flex items-center gap-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>
+        <ArrowLeft size={20} strokeWidth={2.6} /> All courses
+      </button>
+      <div className="mb-6 flex items-center gap-4">
+        <div className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: course.color, border: '3px solid #4a3b12' }}><Comb size={28} /></div>
+        <div>
+          <h2 className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{course.name}</h2>
+          <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>{course.goal} · {course.students} learners</p>
+        </div>
+      </div>
+      <div className="mb-6 flex flex-wrap gap-2">
+        {subTabs.map((t) => (
+          <button key={t} onClick={() => setSub(t)} className="squish rounded-full px-5 py-2.5 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: sub === t ? 'var(--honey)' : 'var(--card)', color: sub === t ? '#4a3b12' : 'var(--ink-soft)', border: '3px solid ' + (sub === t ? '#4a3b12' : 'var(--card-line)') }}>{t}</button>
+        ))}
+      </div>
+      <div key={sub}>
+        {sub === 'Meeting' && <Meeting isTutor={isTutor} name={name} />}
+        {sub === 'Homework' && <Homework isTutor={isTutor} courseId={course.id} list={hw} setList={setHw} />}
+        {sub === 'Quizzes' && <Quizzes isTutor={isTutor} courseId={course.id} list={quizzes} setList={setQuizzes} />}
+        {sub === 'Resources' && <Resources isTutor={isTutor} courseId={course.id} list={resources} setList={setResources} />}
+      </div>
+    </div>
+  )
+}
+
+/* ----------------------------- Courses list ------------------------------- */
+
+function CoursesList({ courses, setCourses, isTutor, onOpen }: { courses: Course[]; setCourses: React.Dispatch<React.SetStateAction<Course[]>>; isTutor: boolean; onOpen: (c: Course) => void }) {
+  const [confirm, setConfirm] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ name: '', goal: '' })
+  const add = async () => {
+    if (!form.name.trim()) return
+    try {
+      const res = await api.courses.create({ name: form.name, goal: form.goal || 'New course' })
+      setCourses((l) => [...l, res])
+      setForm({ name: '', goal: '' })
+      setAdding(false)
+    } catch { /* ignore */ }
+  }
+  const removeCourse = async (id: string) => {
+    try {
+      await api.courses.remove(id)
+      setCourses((l) => l.filter((x) => x.id !== id))
+      setConfirm(null)
+    } catch { /* ignore */ }
+  }
+  return (
+    <>
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {courses.map((c) => (
+          <div key={c.id} className="squish pop rounded-[28px] p-6" style={{ background: 'var(--card)', border: '3px solid var(--card-line)', boxShadow: 'var(--shadow)' }}>
+            <div className="mb-4 flex items-start justify-between">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: c.color, border: '3px solid #4a3b12' }}><Comb size={24} /></div>
+              <Pill>{c.students} learners</Pill>
+            </div>
+            <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{c.name}</h3>
+            <p className="mb-4 font-bold" style={{ color: 'var(--ink-soft)' }}>{c.goal}</p>
+            <div className="mb-2 flex justify-between text-sm font-extrabold" style={{ color: 'var(--ink-soft)' }}><span>Progress</span><span>{c.progress}%</span></div>
+            <div className="mb-5 h-4 w-full overflow-hidden rounded-full" style={{ background: 'var(--bg-soft)' }}><div className="h-full rounded-full transition-all duration-700" style={{ width: `${c.progress}%`, background: 'linear-gradient(90deg,var(--honey-deep),var(--honey))' }} /></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Btn onClick={() => onOpen(c)}>Open course</Btn>
+              {isTutor &&
+                (confirm === c.id ? (
+                  <><span className="font-extrabold">Delete?</span><Btn tone="grape" onClick={() => removeCourse(c.id)}>Yes</Btn><Btn tone="ghost" onClick={() => setConfirm(null)}>No</Btn></>
+                ) : (
+                  <Btn tone="ghost" onClick={() => setConfirm(c.id)}><Trash2 size={18} /></Btn>
+                ))}
+            </div>
+          </div>
+        ))}
+        {isTutor && (
+          <div className="squish grid cursor-pointer place-items-center rounded-[28px] p-6 text-center" onClick={() => setAdding(true)} style={{ background: 'var(--card)', border: '3px dashed var(--card-line)' }}>
+            <div>
+              <span className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Plus size={28} strokeWidth={3} /></span>
+              <p className="font-extrabold" style={{ color: 'var(--ink-soft)' }}>Start a new hive</p>
+            </div>
+          </div>
+        )}
+      </div>
+      {adding && (
+        <Modal onClose={() => setAdding(false)}>
+          <h3 className="mb-5 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>New course</h3>
+          <div className="space-y-4">
+            <input className={inputCls} style={inputStyle} placeholder="Course name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input className={inputCls} style={inputStyle} placeholder="Goal / subtitle" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={add}>Create</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+/* --------------------------- Personal Schedule ---------------------------- */
+
+type Deadline = { day: number; label: string; sub: string; tone: string }
+
+function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: Course[]; hw: HW[]; quizzes: QQ[]; reminders: Reminder[]; setReminders: React.Dispatch<React.SetStateAction<Reminder[]>> }) {
+  const courseName = (id: string) => courses.find((c) => c.id === id)?.name ?? 'Course'
+  const deadlines: Deadline[] = [
+    ...hw.map((h) => ({ day: h.dueDay, label: h.title, sub: courseName(h.courseId) + ' · homework', tone: '#ffcf3f' })),
+    ...quizzes.map((q) => ({ day: q.dueDay, label: q.title, sub: courseName(q.courseId) + ' · quiz', tone: '#a37bff' })),
+    ...reminders.map((r) => ({ day: r.day, label: r.label, sub: 'Personal reminder', tone: '#ff9db0' })),
+  ].sort((a, b) => a.day - b.day)
+
+  const byDay = new Map<number, Deadline[]>()
+  deadlines.forEach((d) => byDay.set(d.day, [...(byDay.get(d.day) ?? []), d]))
+
+  const dow = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  const startPad = 6
+  const cells = [...Array(startPad).fill(null), ...Array.from({ length: 31 }, (_, i) => i + 1)]
+
+  const addReminder = async (day: number) => {
+    const label = prompt(`Add reminder on ${dueLabel(day)}:`)
+    if (label) {
+      try {
+        const res = await api.reminders.create({ day, label })
+        setReminders((r) => [...r, res])
+      } catch { /* ignore */ }
+    }
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+      <Card>
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{MONTH}</h3>
+          <div className="flex gap-2">
+            <button className="squish grid h-11 w-11 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '3px solid var(--card-line)', color: 'var(--ink)' }}><ChevronLeft size={20} strokeWidth={2.6} /></button>
+            <button className="squish grid h-11 w-11 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '3px solid var(--card-line)', color: 'var(--ink)' }}><ChevronRight size={20} strokeWidth={2.6} /></button>
+          </div>
+        </div>
+        <div className="mb-2 grid grid-cols-7 gap-2 text-center">{dow.map((d, i) => <span key={i} className="text-sm font-extrabold" style={{ color: 'var(--ink-soft)' }}>{d}</span>)}</div>
+        <div className="grid grid-cols-7 gap-2">
+          {cells.map((d, i) => {
+            if (d == null) return <div key={i} />
+            const evs = byDay.get(d)
+            return (
+              <button key={i} onClick={() => addReminder(d)} className="squish relative aspect-square rounded-2xl p-1.5 text-left" style={{ background: evs ? evs[0].tone : 'var(--bg-soft)', border: '2px solid ' + (evs ? '#4a3b12' : 'transparent') }}>
+                <span className="text-sm font-extrabold" style={{ color: '#4a3b12' }}>{d}</span>
+                {evs && <span className="absolute inset-x-1 bottom-1 truncate text-[10px] font-extrabold" style={{ color: '#4a3b12' }}>{evs.length > 1 ? `${evs.length} events` : evs[0].label}</span>}
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-5 flex flex-wrap gap-4 text-sm font-extrabold" style={{ color: 'var(--ink-soft)' }}>
+          {[['#ffcf3f', 'Homework'], ['#a37bff', 'Quiz'], ['#ff9db0', 'Reminder']].map(([c, l]) => <span key={l} className="flex items-center gap-2"><span className="h-4 w-4 rounded-full" style={{ background: c, border: '2px solid #4a3b12' }} />{l}</span>)}
+        </div>
+        <p className="mt-4 text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>Tap any day to add a personal reminder.</p>
+      </Card>
+
+      <Card>
+        <div className="mb-4 flex items-center gap-2">
+          <Bell size={22} strokeWidth={2.6} color="var(--honey-deep)" />
+          <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Upcoming</h3>
+        </div>
+        <div className="space-y-3">
+          {deadlines.length === 0 && <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>Nothing scheduled 🎉</p>}
+          {deadlines.map((d, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-2xl px-4 py-3" style={{ background: 'var(--bg-soft)' }}>
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl" style={{ background: d.tone, border: '2px solid #4a3b12' }}>
+                <div className="text-center leading-none">
+                  <div className="text-[9px] font-extrabold" style={{ color: '#4a3b12' }}>AUG</div>
+                  <div className="text-base font-extrabold" style={{ color: '#4a3b12', fontFamily: 'var(--font-display)' }}>{d.day}</div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-extrabold">{d.label}</p>
+                <p className="truncate text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{d.sub}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+/* --------------------------------- shell ---------------------------------- */
+
+export default function App() {
+  const [session, setSession] = useState<{ name: string; role: Role } | null>(null)
+  const [dark, setDark] = useState(false)
+  const [view, setView] = useState<'courses' | 'schedule'>('courses')
+  const [openCourse, setOpenCourse] = useState<Course | null>(null)
+  const [checkingAuth, setCheckingAuth] = useState(true)
+
+  const [courses, setCourses] = useState<Course[]>([])
+  const [hw, setHw] = useState<HW[]>([])
+  const [quizzes, setQuizzes] = useState<QQ[]>([])
+  const [resources, setResources] = useState<Res[]>([])
+  const [reminders, setReminders] = useState<Reminder[]>([])
+
+  /* Check for existing session cookie on mount */
+  useEffect(() => {
+    api.auth.me()
+      .then((u) => setSession({ name: u.name, role: u.role as Role }))
+      .catch(() => { /* not logged in */ })
+      .finally(() => setCheckingAuth(false))
+  }, [])
+
+  /* Fetch all data when session is established */
+  const loadData = useCallback(async () => {
+    if (!session) return
+    try {
+      const [c, r] = await Promise.all([
+        api.courses.list(),
+        api.reminders.list(),
+      ])
+      setCourses(c)
+      setReminders(r)
+    } catch { /* ignore */ }
+  }, [session])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  /* Fetch course-specific data when a course is opened */
+  useEffect(() => {
+    if (!openCourse) return
+    const courseId = openCourse.id
+    Promise.all([
+      api.homework.list(courseId).then((rows) => setHw(rows.map(mapHW))),
+      api.quizzes.list(courseId).then((rows) => setQuizzes(rows)),
+      api.resources.list(courseId).then((rows) => setResources(rows.map(mapRes))),
+    ]).catch(() => { /* ignore */ })
+  }, [openCourse])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark)
+  }, [dark])
+
+  const isTutor = session?.role === 'tutor'
+  if (checkingAuth) return <div className="grid min-h-screen place-items-center" style={{ background: 'var(--bg)' }}><Bee size={80} /></div>
+  if (!session) return <Login onEnter={(name, role) => setSession({ name, role })} />
+
+  const navBtn = (v: 'courses' | 'schedule', label: string, Icon: React.ComponentType<{ size?: number }>) => (
+    <button
+      onClick={() => {
+        setView(v)
+        setOpenCourse(null)
+      }}
+      className="squish inline-flex items-center gap-2 rounded-full px-5 py-2.5 font-extrabold"
+      style={{ fontFamily: 'var(--font-display)', background: view === v && !openCourse ? 'var(--honey)' : 'var(--card)', color: view === v && !openCourse ? '#4a3b12' : 'var(--ink-soft)', border: '3px solid ' + (view === v && !openCourse ? '#4a3b12' : 'var(--card-line)') }}
+    >
+      <Icon size={18} /> {label}
+    </button>
+  )
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <header className="relative" style={{ background: 'var(--honey)', borderBottom: '4px solid #4a3b12' }}>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-5">
+          <div className="flex items-center gap-2">
+            <Bee size={44} />
+            <span className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: '#4a3b12' }}>edu<span style={{ color: '#fff' }}>BUZZ</span></span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden items-center gap-2 font-extrabold sm:flex" style={{ color: '#4a3b12' }}>
+              {session.name}
+              <span className="rounded-full px-3 py-0.5 text-sm" style={{ background: isTutor ? '#a37bff' : '#fffdf4', color: isTutor ? '#fff' : '#4a3b12', border: '2px solid #4a3b12' }}>{isTutor ? 'Tutor' : 'Student'}</span>
+            </span>
+            <button onClick={() => setDark((v) => !v)} className="squish rounded-full px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#fffdf4', color: '#4a3b12', border: '3px solid #4a3b12' }}>{dark ? 'Light' : 'Dark'}</button>
+            <button onClick={async () => { try { await api.auth.logout() } catch {} setSession(null) }} className="squish rounded-full px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#4a3b12', color: 'var(--honey)', border: '3px solid #4a3b12' }}>Exit</button>
+          </div>
+        </div>
+        <HoneyEdge />
+      </header>
+
+      <nav className="mx-auto mt-24 max-w-6xl px-6">
+        <div className="flex flex-wrap gap-2">
+          {navBtn('courses', 'My Courses', Comb)}
+          {navBtn('schedule', 'My Schedule', CalendarDays)}
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-6xl px-6 py-8">
+        {openCourse ? (
+          <CourseWorkspace course={openCourse} isTutor={isTutor} name={session.name} back={() => setOpenCourse(null)} hw={hw} setHw={setHw} quizzes={quizzes} setQuizzes={setQuizzes} resources={resources} setResources={setResources} />
+        ) : view === 'courses' ? (
+          <>
+            <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>My Courses</h2>
+            <CoursesList courses={courses} setCourses={setCourses} isTutor={isTutor} onOpen={setOpenCourse} />
+          </>
+        ) : (
+          <>
+            <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>My Schedule</h2>
+            <Schedule courses={courses} hw={hw} quizzes={quizzes} reminders={reminders} setReminders={setReminders} />
+          </>
+        )}
+      </main>
+
+      <footer className="mx-auto max-w-6xl px-6 pb-10 text-center font-bold" style={{ color: 'var(--ink-soft)' }}>eduBUZZ · sweet, secure, guest-friendly learning 🍯</footer>
+    </div>
+  )
+}
