@@ -1,0 +1,113 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { seedIfEmpty } from "./seed.js";
+
+// Routes
+import authRoutes from "./routes/auth.routes.js";
+import coursesRoutes from "./routes/courses.routes.js";
+import homeworkRoutes from "./routes/homework.routes.js";
+import quizzesRoutes from "./routes/quizzes.routes.js";
+import resourcesRoutes from "./routes/resources.routes.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const IS_PROD = process.env.NODE_ENV === "production";
+const app = express();
+const PORT = parseInt(process.env.PORT || process.env.API_PORT || "3001");
+
+/* ------------------------------------------------------------------ */
+/*  Security middleware                                                */
+/* ------------------------------------------------------------------ */
+
+// Helmet: security headers (CSP, HSTS, etc.)
+app.use(helmet({ contentSecurityPolicy: false })); // CSP disabled for dev proxy
+
+// CORS: allow Vite dev server + production frontend domain
+const allowedOrigins = [
+  "http://localhost:8443",
+  "https://localhost:8443",
+  `http://localhost:${process.env.PORT || 8443}`,
+];
+if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL);
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
+
+// Parse JSON bodies (limit size to prevent abuse)
+app.use(express.json({ limit: "1mb" }));
+
+// Parse cookies (for JWT httpOnly cookie)
+app.use(cookieParser());
+
+/* ------------------------------------------------------------------ */
+/*  Routes                                                             */
+/* ------------------------------------------------------------------ */
+
+app.use("/api/auth", authRoutes);
+app.use("/api/courses", coursesRoutes);
+app.use("/api", homeworkRoutes);   // /api/courses/:courseId/homework + /api/homework/:id/*
+app.use("/api", quizzesRoutes);    // /api/courses/:courseId/quizzes + /api/quizzes/:id/*
+app.use("/api", resourcesRoutes); // /api/courses/:courseId/resources + /api/resources/:id + /api/reminders
+
+/* ------------------------------------------------------------------ */
+/*  Health check                                                       */
+/* ------------------------------------------------------------------ */
+
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Production: serve Vite-built frontend from dist/                   */
+/* ------------------------------------------------------------------ */
+
+if (IS_PROD) {
+  const distPath = path.join(__dirname, "..", "dist");
+  app.use(express.static(distPath));
+  // SPA fallback: any non-API route → index.html
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Global error handler — never leak stack traces                     */
+/* ------------------------------------------------------------------ */
+
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error("❌ Unhandled error:", err.message);
+    if (process.env.NODE_ENV !== "production") {
+      console.error(err.stack);
+    }
+    res.status(500).json({ error: "Internal server error" });
+  }
+);
+
+/* ------------------------------------------------------------------ */
+/*  Start                                                              */
+/* ------------------------------------------------------------------ */
+
+async function start() {
+  await seedIfEmpty();
+
+  app.listen(PORT, () => {
+    console.log(`🐝 eduBUZZ API running on http://localhost:${PORT}`);
+    console.log(`   Security: JWT httpOnly cookies, bcrypt, role-based access`);
+    console.log(`   Demo accounts: student@edubuzz.app / tutor@edubuzz.app (pw: demo1234)`);
+  });
+}
+
+start().catch(console.error);
