@@ -104,6 +104,7 @@ db.exec(`
     course_id   TEXT    NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     name        TEXT    NOT NULL,
     size        TEXT    NOT NULL DEFAULT '0 KB',
+    file_url    TEXT,
     created_by  INTEGER REFERENCES users(id)
   );
 
@@ -121,5 +122,12 @@ db.exec(`
     UNIQUE(user_id, course_id)
   );
 `);
+
+try {
+  // Add file_url column if it doesn't exist (migration)
+  db.exec("ALTER TABLE resources ADD COLUMN file_url TEXT;");
+} catch (e) {
+  // Column already exists
+}
 
 export default db;

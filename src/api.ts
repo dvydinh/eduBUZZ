@@ -150,11 +150,18 @@ export const api = {
   resources: {
     list: (courseId: string) =>
       apiFetch<any[]>(`/courses/${courseId}/resources`),
-    create: (courseId: string, body: { name: string; size?: string }) =>
-      apiFetch<any>(`/courses/${courseId}/resources`, {
+    create: (courseId: string, body: FormData) => {
+      const headers = { ...getHeaders() };
+      delete headers["Content-Type"]; // let browser set boundary
+      return fetch(`${BASE}/courses/${courseId}/resources`, {
         method: "POST",
-        body: JSON.stringify(body),
-      }),
+        headers,
+        body,
+      }).then((res) => {
+        if (!res.ok) throw new Error("Failed");
+        return res.json();
+      });
+    },
     remove: (id: number) =>
       apiFetch(`/resources/${id}`, { method: "DELETE" }),
   },

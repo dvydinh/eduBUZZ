@@ -723,14 +723,18 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
 function Resources({ isTutor, courseId, list, setList }: { isTutor: boolean; courseId: string; list: Res[]; setList: React.Dispatch<React.SetStateAction<Res[]>> }) {
   const [q, setQ] = useState('')
   const shown = list.filter((f) => f.courseId === courseId && f.name.toLowerCase().includes(q.toLowerCase()))
-  const upload = async () => {
-    const n = prompt('File name?')
-    if (n) {
-      try {
-        const res = await api.resources.create(courseId, { name: n })
-        setList((f) => [mapRes(res), ...f])
-      } catch { /* ignore */ }
-    }
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await api.resources.create(courseId, formData)
+      setList((f) => [mapRes(res), ...f])
+    } catch { /* ignore */ }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
   const removeRes = async (id: number) => {
     try {
@@ -745,7 +749,12 @@ function Resources({ isTutor, courseId, list, setList }: { isTutor: boolean; cou
           <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2" color="var(--ink-soft)" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search materials…" className="w-full rounded-full py-3 pl-12 pr-5 font-bold outline-none" style={{ border: '3px solid var(--card-line)', background: 'var(--card)', color: 'var(--ink)' }} />
         </div>
-        {isTutor && <Btn onClick={upload}><Plus size={18} /> Upload</Btn>}
+        {isTutor && (
+          <label className="flex items-center gap-2 px-4 py-2 rounded-xl cursor-pointer font-bold text-sm bg-[var(--honey)] hover:opacity-90 transition border-2 border-[#4a3b12] text-[#4a3b12]">
+            <Plus size={18} /> Upload
+            <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
+          </label>
+        )}
       </div>
       <div className="grid gap-6 md:grid-cols-2">
         {shown.map((f) => (

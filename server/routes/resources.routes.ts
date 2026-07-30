@@ -16,40 +16,58 @@ router.get("/courses/:courseId/resources", requireAuth, (req, res) => {
   res.json(rows);
 });
 
-/* ------------------------------------------------------------------ */
-/*  POST /api/courses/:courseId/resources  (tutor only)                 */
-/* ------------------------------------------------------------------ */
+import multer from "multer";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 
-const createSchema = z.object({
-  name: z.string().min(1).max(300),
-  size: z.string().max(50).default("1.0 MB"),
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadsDir = path.join(__dirname, "..", "..", "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  },
 });
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
 
-router.post("/courses/:courseId/resources", requireAuth, requireTutor, (req, res) => {
-  const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid input" });
-    return;
-  }
+/* ------------------------------------------------------------------ */
+/*  POST /api/courses/:courseId/resources                               */
+/* ------------------------------------------------------------------ */
 
+// We allow both tutors and students to upload resources now, as students need to share PDFs on Whiteboard.
+router.post("/courses/:courseId/resources", requireAuth, upload.single("file"), (req, res) => {
   const course = db.prepare("SELECT id FROM courses WHERE id = ?").get(req.params.courseId);
   if (!course) {
     res.status(404).json({ error: "Course not found" });
     return;
   }
 
-  const { name, size } = parsed.data;
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ error: "No file uploaded" });
+    return;
+  }
+
+  const name = req.body.name || file.originalname;
+  const sizeMb = (file.size / (1024 * 1024)).toFixed(1) + " MB";
+  const fileUrl = `/uploads/${file.filename}`;
+
   const result = db
     .prepare(
-      "INSERT INTO resources (course_id, name, size, created_by) VALUES (?, ?, ?, ?)"
+      "INSERT INTO resources (course_id, name, size, file_url, created_by) VALUES (?, ?, ?, ?, ?)"
     )
-    .run(req.params.courseId, name, size, req.user!.userId);
+    .run(req.params.courseId, name, sizeMb, fileUrl, req.user!.userId);
 
   res.status(201).json({
     id: result.lastInsertRowid,
     course_id: req.params.courseId,
     name,
-    size,
+    size: sizeMb,
+    file_url: fileUrl
   });
 });
 

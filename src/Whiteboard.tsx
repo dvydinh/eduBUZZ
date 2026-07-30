@@ -1,17 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { Upload, PenTool, Eraser, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
-import { getSocket } from './api'
+import { getSocket, api } from './api'
+import { Type } from 'lucide-react'
 
 // We use unpkg for the worker to avoid copying it to public/ manually
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
-import { Type } from 'lucide-react'
 
 export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [pageNum, setPageNum] = useState(1)
   const [color, setColor] = useState('#000000')
   const [tool, setTool] = useState<'pen' | 'eraser' | 'type'>('pen')
+  const [resources, setResources] = useState<any[]>([])
+  const currentPdfUrl = useRef<string | null>(null)
+  
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const isSyncingScroll = useRef(false)
   
   // Text Tool State
   const [activeText, setActiveText] = useState<{ x: number; y: number; text: string } | null>(null)
@@ -79,7 +84,8 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
         socket.emit('wb-sync-state', requesterId, {
           pageNum,
           drawDataUrl: canvas.toDataURL(),
-          texts
+          texts,
+          pdfUrl: currentPdfUrl.current
         })
       }
     })
@@ -87,6 +93,9 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
     socket.on('wb-sync-state', (state: any) => {
       if (state.pageNum) setPageNum(state.pageNum)
       if (state.texts) setTexts(state.texts)
+      if (state.pdfUrl) {
+        loadPdfFromUrl(state.pdfUrl)
+      }
       if (state.drawDataUrl) {
         const img = new Image()
         img.onload = () => {
@@ -94,6 +103,19 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
           if (ctx) ctx.drawImage(img, 0, 0)
         }
         img.src = state.drawDataUrl
+      }
+    })
+
+    socket.on('wb-set-pdf', (url: string) => {
+      loadPdfFromUrl(url)
+    })
+    
+    socket.on('wb-scroll', (data: { scrollTop: number, scrollLeft: number }) => {
+      if (wrapperRef.current) {
+        isSyncingScroll.current = true
+        wrapperRef.current.scrollTop = data.scrollTop
+        wrapperRef.current.scrollLeft = data.scrollLeft
+        setTimeout(() => isSyncingScroll.current = false, 100)
       }
     })
     
@@ -108,8 +130,27 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
       socket.off('wb-type-end')
       socket.off('wb-request-state')
       socket.off('wb-sync-state')
+      socket.off('wb-set-pdf')
+      socket.off('wb-scroll')
     }
   }, [courseId, pageNum, texts])
+
+  useEffect(() => {
+    api.resources.list(courseId).then(setResources).catch(console.error)
+  }, [courseId])
+
+  const loadPdfFromUrl = async (url: string) => {
+    currentPdfUrl.current = url
+    try {
+      // Make sure the URL has the correct domain if it's relative
+      const loadedPdf = await pdfjsLib.getDocument(url).promise
+      setPdf(loadedPdf)
+      setPageNum(1)
+      clearBoard()
+    } catch (e) {
+      console.error("Failed to load PDF", e)
+    }
+  }
 
   useEffect(() => {
     if (!pdf) return
@@ -147,17 +188,6 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
       if (renderTask) renderTask.cancel()
     }
   }, [pdf, pageNum])
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const fileUrl = URL.createObjectURL(file)
-    const loadedPdf = await pdfjsLib.getDocument(fileUrl).promise
-    setPdf(loadedPdf)
-    setPageNum(1)
-    getSocket().emit('wb-page', courseId, 1)
-    clearBoard()
-  }
 
   const changePage = (offset: number) => {
     if (!pdf) return
@@ -280,14 +310,35 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
           <span className="font-bold text-sm bg-white/50 px-3 py-1 rounded-lg border border-[var(--card-line)]">{pageNum} / {pdf ? pdf.numPages : 1}</span>
           <button onClick={() => changePage(1)} className="p-2 rounded-xl hover:bg-white/50"><ChevronRight size={20} /></button>
           <div className="w-px h-6 bg-[var(--card-line)] mx-2" />
-          <label className="flex items-center gap-2 px-4 py-2 rounded-xl cursor-pointer font-bold text-sm bg-[var(--honey)] hover:opacity-90 transition border-2 border-[#4a3b12] text-[#4a3b12]">
-            <Upload size={16} strokeWidth={2.6} /> Share PDF
-            <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
-          </label>
+          
+          <select 
+            className="px-3 py-2 rounded-xl font-bold text-sm outline-none border-2 border-[var(--card-line)] bg-white cursor-pointer"
+            onChange={(e) => {
+              if (e.target.value) {
+                const url = e.target.value
+                loadPdfFromUrl(url)
+                getSocket().emit('wb-set-pdf', courseId, url)
+                e.target.value = ''
+              }
+            }}
+          >
+            <option value="">📂 Open from Resources</option>
+            {resources.filter(r => r.file_url && r.file_url.toLowerCase().endsWith('.pdf')).map(r => (
+              <option key={r.id} value={r.file_url}>{r.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      <div className="flex-1 relative overflow-auto bg-gray-100 flex items-center justify-center p-4">
+      <div 
+        ref={wrapperRef}
+        className="flex-1 relative overflow-auto bg-gray-100 flex items-center justify-center p-4"
+        onScroll={(e) => {
+          if (isSyncingScroll.current) return
+          const target = e.target as HTMLDivElement
+          getSocket().emit('wb-scroll', courseId, { scrollTop: target.scrollTop, scrollLeft: target.scrollLeft })
+        }}
+      >
         <div ref={containerRef} className="relative shadow-2xl bg-white" style={{ minWidth: 800, minHeight: 600 }}>
           <canvas ref={bgCanvasRef} className="absolute inset-0 bg-white" />
           <canvas 

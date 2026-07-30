@@ -56,6 +56,12 @@ app.use("/api", homeworkRoutes);   // /api/courses/:courseId/homework + /api/hom
 app.use("/api", quizzesRoutes);    // /api/courses/:courseId/quizzes + /api/quizzes/:id/*
 app.use("/api", resourcesRoutes); // /api/courses/:courseId/resources + /api/resources/:id + /api/reminders
 
+// Serve uploaded files statically
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+import fs from 'node:fs';
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
+
 /* ------------------------------------------------------------------ */
 /*  Health check                                                       */
 /* ------------------------------------------------------------------ */
@@ -152,6 +158,14 @@ io.on("connection", (socket) => {
 
     socket.on("wb-type-end", (roomId: string, id: string) => {
       socket.to(roomId).emit("wb-type-end", id);
+    });
+
+    socket.on("wb-set-pdf", (roomId: string, url: string) => {
+      socket.to(roomId).emit("wb-set-pdf", url);
+    });
+
+    socket.on("wb-scroll", (roomId: string, scrollData: any) => {
+      socket.to(roomId).emit("wb-scroll", scrollData);
     });
 
     socket.on("wb-request-state-broadcast", (roomId: string) => {
