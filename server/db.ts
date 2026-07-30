@@ -1,9 +1,19 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, "edubuzz.db");
+let DB_PATH = path.join(__dirname, "edubuzz.db");
+
+// In production, save DB to the /app/data folder so it can be safely mounted to a Volume
+if (process.env.NODE_ENV === "production") {
+  const dataDir = path.join(__dirname, "..", "data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  DB_PATH = path.join(dataDir, "edubuzz.db");
+}
 
 const db = new Database(DB_PATH);
 
