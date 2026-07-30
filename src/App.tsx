@@ -336,7 +336,7 @@ type Peer = { n: string; muted: boolean; camOff: boolean; stream?: MediaStream }
 
 function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; courseId: string }) {
   const [cam, setCam] = useState(false)
-  const [mic, setMic] = useState(true)
+  const [mic, setMic] = useState(false)
   const [locked, setLocked] = useState(false)
   const [share, setShare] = useState(false)
   const [board, setBoard] = useState(false)
@@ -381,20 +381,8 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     const socket = getSocket()
     socket.connect()
 
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: false, audio: true }).then((stream) => {
-        localStreamRef.current = stream
-        setLocalStream(stream)
-        
-        socket.emit('join-room', courseId, { name, muted: !mic, camOff: !cam })
-      }).catch(err => {
-        console.error("Failed to get local stream", err)
-        socket.emit('join-room', courseId, { name, muted: true, camOff: true })
-      })
-    } else {
-      console.warn("getUserMedia not supported (requires HTTPS or localhost)")
-      socket.emit('join-room', courseId, { name, muted: true, camOff: true })
-    }
+    // Do NOT request media immediately. Start muted/camOff and wait for user to toggle.
+    socket.emit('join-room', courseId, { name, muted: true, camOff: true })
 
     const createPeer = (id: string, n: string) => {
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
