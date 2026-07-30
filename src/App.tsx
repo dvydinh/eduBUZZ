@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, Socket } from 'socket.io-client'
 
-let socketInstance: Socket | null = null
-function getSocket() {
-  if (!socketInstance) socketInstance = io({ path: '/socket.io/', autoConnect: false })
-  return socketInstance
-}
+
 import {
   Video,
   VideoOff,

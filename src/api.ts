@@ -3,7 +3,15 @@
 /*  All API calls go through this to ensure consistent auth handling   */
 /* ------------------------------------------------------------------ */
 
+import { io, Socket } from 'socket.io-client';
+
 const BASE = "/api";
+
+let socketInstance: Socket | null = null;
+export function getSocket() {
+  if (!socketInstance) socketInstance = io({ path: '/socket.io/', autoConnect: false });
+  return socketInstance;
+}
 
 interface ApiError {
   error: string;
