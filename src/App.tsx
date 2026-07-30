@@ -32,9 +32,11 @@ import {
   Volume2,
   Maximize2,
   Minimize2,
+  PenTool,
 } from 'lucide-react'
 import { useBee } from './useBee'
-import { api } from './api'
+import { getSocket, api } from './api'
+import { InteractiveWhiteboard } from './Whiteboard'
 
 type Role = 'student' | 'tutor'
 const SAMPLE_PDF = 'https://mozilla.github.io/pdf.js/web/compressed.tracemonkey-pldi-09.pdf'
@@ -337,8 +339,19 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
   const [mic, setMic] = useState(true)
   const [locked, setLocked] = useState(false)
   const [share, setShare] = useState(false)
+  const [board, setBoard] = useState(false)
   const [hand, setHand] = useState(false)
   const [left, setLeft] = useState(false)
+
+  useEffect(() => {
+    if (left) {
+      localStreamRef.current?.getTracks().forEach(t => t.stop())
+      screenStreamRef.current?.getTracks().forEach(t => t.stop())
+      setLocalStream(null)
+      Object.values(pcsRef.current).forEach(pc => pc.close())
+      getSocket().disconnect()
+    }
+  }, [left])
 
   const [peers, setPeers] = useState<Record<string, Peer>>({})
   const [chat, setChat] = useState<{ who: string; msg: string }[]>([])
@@ -610,10 +623,18 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
           <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Camera" onClick={toggleCam} />
           <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={toggleMic} />
           <IconToggle on={share} onIcon={MonitorUp} offIcon={MonitorUp} label="Share" onClick={toggleShare} />
+          <IconToggle on={board} onIcon={PenTool} offIcon={PenTool} label="Board" onClick={() => setBoard(b => !b)} />
           {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => { setHand(!hand); getSocket().emit('toggle-status', { hand: !hand }) }} />}
           <IconToggle on={false} onIcon={PhoneOff} offIcon={PhoneOff} label="Leave" onClick={() => setLeft(true)} danger />
         </div>
       </Card>
+      
+      {board && (
+        <div className="col-span-full h-[80vh]">
+          <InteractiveWhiteboard courseId={courseId} isTutor={isTutor} />
+        </div>
+      )}
+
       <div className="space-y-6">
         <Card>
           <div className="mb-4 flex items-center justify-between">

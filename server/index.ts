@@ -133,6 +133,24 @@ io.on("connection", (socket) => {
       socket.to(roomId).emit("toggle-status", socket.id, status);
     });
 
+    // Whiteboard Sync
+    socket.on("wb-draw", (roomId: string, drawData: any) => {
+      socket.to(roomId).emit("wb-draw", drawData);
+    });
+    
+    socket.on("wb-clear", (roomId: string) => {
+      socket.to(roomId).emit("wb-clear");
+    });
+    
+    socket.on("wb-page", (roomId: string, pageNum: number) => {
+      socket.to(roomId).emit("wb-page", pageNum);
+    });
+
+    socket.on("leave-room", (room: string) => {
+      socket.leave(room);
+      socket.to(room).emit("user-left", socket.id);
+    });
+
     socket.on("disconnect", () => {
       socket.to(roomId).emit("user-left", socket.id);
     });
