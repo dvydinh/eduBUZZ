@@ -37,7 +37,7 @@ const MONTH = 'August 2026'
 
 /* --------------------------------- data ----------------------------------- */
 
-type Course = { id: string; name: string; goal: string; progress: number; students: number; color: string }
+type Course = { id: string; name: string; goal: string; progress: number; students: number; color: string; is_enrolled?: boolean }
 type HW = {
   id: number
   courseId: string
@@ -845,15 +845,22 @@ function CourseWorkspace({
 
 /* ----------------------------- Courses list ------------------------------- */
 
-function CoursesList({ courses, setCourses, isTutor, onOpen }: { courses: Course[]; setCourses: React.Dispatch<React.SetStateAction<Course[]>>; isTutor: boolean; onOpen: (c: Course) => void }) {
+function CoursesList({ courses, setCourses, isTutor, onOpen, isExplore }: { courses: Course[]; setCourses: React.Dispatch<React.SetStateAction<Course[]>>; isTutor: boolean; onOpen: (c: Course) => void; isExplore?: boolean }) {
   const [confirm, setConfirm] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ name: '', goal: '' })
+  const [searchQuery, setSearchQuery] = useState('')
+  const [joining, setJoining] = useState<string | null>(null)
+
+  const displayedCourses = isExplore 
+    ? courses.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.goal.toLowerCase().includes(searchQuery.toLowerCase()))
+    : courses.filter(c => c.is_enrolled)
+
   const add = async () => {
     if (!form.name.trim()) return
     try {
       const res = await api.courses.create({ name: form.name, goal: form.goal || 'New course' })
-      setCourses((l) => [...l, res])
+      setCourses((l) => [...l, { ...res, is_enrolled: true }])
       setForm({ name: '', goal: '' })
       setAdding(false)
     } catch { /* ignore */ }
@@ -865,10 +872,34 @@ function CoursesList({ courses, setCourses, isTutor, onOpen }: { courses: Course
       setConfirm(null)
     } catch { /* ignore */ }
   }
+  const joinCourse = async (id: string) => {
+    setJoining(id)
+    try {
+      await api.courses.join(id)
+      setCourses((l) => l.map(c => c.id === id ? { ...c, is_enrolled: true, students: c.students + 1 } : c))
+    } catch (e: any) {
+      alert(e.message || "Failed to join course")
+    } finally {
+      setJoining(null)
+    }
+  }
+
   return (
     <>
+      {isExplore && (
+        <div className="mb-6 relative">
+          <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2" color="var(--ink-soft)" />
+          <input 
+            value={searchQuery} 
+            onChange={(e) => setSearchQuery(e.target.value)} 
+            placeholder="Search all courses..." 
+            className="w-full rounded-full py-3 pl-12 pr-5 font-bold outline-none" 
+            style={{ border: '3px solid var(--card-line)', background: 'var(--card)', color: 'var(--ink)' }} 
+          />
+        </div>
+      )}
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {courses.map((c) => (
+        {displayedCourses.map((c) => (
           <div key={c.id} className="squish pop rounded-[28px] p-6" style={{ background: 'var(--card)', border: '3px solid var(--card-line)', boxShadow: 'var(--shadow)' }}>
             <div className="mb-4 flex items-start justify-between">
               <div className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: c.color, border: '3px solid #4a3b12' }}><Comb size={24} /></div>
@@ -879,8 +910,19 @@ function CoursesList({ courses, setCourses, isTutor, onOpen }: { courses: Course
             <div className="mb-2 flex justify-between text-sm font-extrabold" style={{ color: 'var(--ink-soft)' }}><span>Progress</span><span>{c.progress}%</span></div>
             <div className="mb-5 h-4 w-full overflow-hidden rounded-full" style={{ background: 'var(--bg-soft)' }}><div className="h-full rounded-full transition-all duration-700" style={{ width: `${c.progress}%`, background: 'linear-gradient(90deg,var(--honey-deep),var(--honey))' }} /></div>
             <div className="flex flex-wrap items-center gap-2">
-              <Btn onClick={() => onOpen(c)}>Open course</Btn>
-              {isTutor &&
+              {c.is_enrolled ? (
+                <Btn onClick={() => onOpen(c)}>Open course</Btn>
+              ) : (
+                isTutor ? (
+                  <Btn tone="ghost" onClick={() => onOpen(c)}>View only</Btn>
+                ) : (
+                  <Btn tone="honey" onClick={() => joinCourse(c.id)}>
+                    {joining === c.id ? 'Joining...' : 'Join Course'}
+                  </Btn>
+                )
+              )}
+              
+              {isTutor && c.is_enrolled &&
                 (confirm === c.id ? (
                   <><span className="font-extrabold">Delete?</span><Btn tone="grape" onClick={() => removeCourse(c.id)}>Yes</Btn><Btn tone="ghost" onClick={() => setConfirm(null)}>No</Btn></>
                 ) : (
@@ -889,7 +931,7 @@ function CoursesList({ courses, setCourses, isTutor, onOpen }: { courses: Course
             </div>
           </div>
         ))}
-        {isTutor && (
+        {!isExplore && isTutor && (
           <div className="squish grid cursor-pointer place-items-center rounded-[28px] p-6 text-center" onClick={() => setAdding(true)} style={{ background: 'var(--card)', border: '3px dashed var(--card-line)' }}>
             <div>
               <span className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Plus size={28} strokeWidth={3} /></span>
@@ -1002,7 +1044,7 @@ function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: 
 export default function App() {
   const [session, setSession] = useState<{ name: string; role: Role } | null>(null)
   const [dark, setDark] = useState(false)
-  const [view, setView] = useState<'courses' | 'schedule'>('courses')
+  const [view, setView] = useState<'courses' | 'explore' | 'schedule'>('courses')
   const [openCourse, setOpenCourse] = useState<Course | null>(null)
   const [checkingAuth, setCheckingAuth] = useState(true)
 
@@ -1054,7 +1096,7 @@ export default function App() {
   if (checkingAuth) return <div className="grid min-h-screen place-items-center" style={{ background: 'var(--bg)' }}><Bee size={80} /></div>
   if (!session) return <Login onEnter={(name, role) => setSession({ name, role })} />
 
-  const navBtn = (v: 'courses' | 'schedule', label: string, Icon: React.ComponentType<{ size?: number }>) => (
+  const navBtn = (v: 'courses' | 'explore' | 'schedule', label: string, Icon: React.ComponentType<{ size?: number }>) => (
     <button
       onClick={() => {
         setView(v)
@@ -1090,6 +1132,7 @@ export default function App() {
       <nav className="mx-auto mt-24 max-w-6xl px-6">
         <div className="flex flex-wrap gap-2">
           {navBtn('courses', 'My Courses', Comb)}
+          {navBtn('explore', 'Explore', Search)}
           {navBtn('schedule', 'My Schedule', CalendarDays)}
         </div>
       </nav>
@@ -1100,7 +1143,12 @@ export default function App() {
         ) : view === 'courses' ? (
           <>
             <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>My Courses</h2>
-            <CoursesList courses={courses} setCourses={setCourses} isTutor={isTutor} onOpen={setOpenCourse} />
+            <CoursesList courses={courses} setCourses={setCourses} isTutor={isTutor} onOpen={setOpenCourse} isExplore={false} />
+          </>
+        ) : view === 'explore' ? (
+          <>
+            <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Explore Courses</h2>
+            <CoursesList courses={courses} setCourses={setCourses} isTutor={isTutor} onOpen={setOpenCourse} isExplore={true} />
           </>
         ) : (
           <>

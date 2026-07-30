@@ -91,6 +91,14 @@ export async function seedIfEmpty() {
     insertRes.run(r.course_id, r.name, r.size);
   }
 
+  /* ---- Enrollments ---- */
+  const insertEnrollment = db.prepare(
+    "INSERT INTO enrollments (user_id, course_id) VALUES (?, ?)"
+  );
+  insertEnrollment.run(1, "sat9");
+  insertEnrollment.run(1, "algb");
+  // Demo student isn't enrolled in 'rdwr' to test Explore tab logic
+
   /* ---- Reminders ---- */
   db.prepare("INSERT INTO reminders (user_id, day, label) VALUES (1, 15, 'Book study room')").run();
 

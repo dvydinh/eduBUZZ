@@ -9,9 +9,30 @@ const router = Router();
 /*  GET /api/courses                                                   */
 /* ------------------------------------------------------------------ */
 
-router.get("/", requireAuth, (_req, res) => {
-  const rows = db.prepare("SELECT * FROM courses ORDER BY rowid").all();
-  res.json(rows);
+router.get("/", requireAuth, (req, res) => {
+  const userId = req.user!.userId;
+  const role = req.user!.role;
+
+  // We fetch all courses and mark `is_enrolled: true` if the user is enrolled (student) or is the creator (tutor)
+  const rows = db.prepare(`
+    SELECT c.*, 
+      CASE 
+        WHEN ? = 'tutor' AND c.created_by = ? THEN 1
+        WHEN ? = 'student' AND e.user_id IS NOT NULL THEN 1
+        ELSE 0
+      END as is_enrolled
+    FROM courses c
+    LEFT JOIN enrollments e ON e.course_id = c.id AND e.user_id = ?
+    ORDER BY c.rowid
+  `).all(role, userId, role, userId);
+
+  // Convert `is_enrolled` from 0/1 to boolean
+  const courses = rows.map((r: any) => ({
+    ...r,
+    is_enrolled: Boolean(r.is_enrolled)
+  }));
+  
+  res.json(courses);
 });
 
 /* ------------------------------------------------------------------ */
@@ -38,6 +59,39 @@ router.post("/", requireAuth, requireTutor, (req, res) => {
   ).run(id, name, goal, color, req.user!.userId);
 
   res.status(201).json({ id, name, goal, progress: 0, students: 0, color });
+});
+
+/* ------------------------------------------------------------------ */
+/*  POST /api/courses/:id/join  (student only)                         */
+/* ------------------------------------------------------------------ */
+
+router.post("/:id/join", requireAuth, (req, res) => {
+  if (req.user!.role !== "student") {
+    res.status(403).json({ error: "Only students can join courses" });
+    return;
+  }
+
+  const courseId = req.params.id;
+  const userId = req.user!.userId;
+
+  // Check if course exists
+  const course = db.prepare("SELECT * FROM courses WHERE id = ?").get(courseId);
+  if (!course) {
+    res.status(404).json({ error: "Course not found" });
+    return;
+  }
+
+  try {
+    db.prepare("INSERT INTO enrollments (user_id, course_id) VALUES (?, ?)").run(userId, courseId);
+    db.prepare("UPDATE courses SET students = students + 1 WHERE id = ?").run(courseId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    if (err.message.includes("UNIQUE constraint failed")) {
+      res.status(400).json({ error: "Already enrolled" });
+    } else {
+      res.status(500).json({ error: "Failed to join course" });
+    }
+  }
 });
 
 /* ------------------------------------------------------------------ */

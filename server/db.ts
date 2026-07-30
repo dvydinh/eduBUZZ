@@ -113,6 +113,13 @@ db.exec(`
     day         INTEGER NOT NULL,
     label       TEXT    NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS enrollments (
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    course_id   TEXT    NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    joined_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, course_id)
+  );
 `);
 
 export default db;

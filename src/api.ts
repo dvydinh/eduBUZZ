@@ -77,6 +77,8 @@ export const api = {
     list: () => apiFetch<any[]>("/courses"),
     create: (body: { name: string; goal: string; color?: string }) =>
       apiFetch<any>("/courses", { method: "POST", body: JSON.stringify(body) }),
+    join: (id: string) =>
+      apiFetch(`/courses/${id}/join`, { method: "POST" }),
     remove: (id: string) =>
       apiFetch(`/courses/${id}`, { method: "DELETE" }),
   },
