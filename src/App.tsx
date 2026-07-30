@@ -589,79 +589,130 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
       </Card>
     )
 
+  const renderControls = (overlay = false) => (
+    <div className={`flex flex-wrap justify-center gap-3 ${overlay ? 'absolute bottom-6 left-1/2 -translate-x-1/2 p-3 bg-white/90 backdrop-blur-md rounded-full shadow-xl border-2 border-[var(--card-line)] z-50' : ''}`}>
+      <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Cam" onClick={toggleCam} />
+      <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={toggleMic} />
+      <IconToggle on={board} onIcon={PenTool} offIcon={PenTool} label="Board" onClick={() => setBoard(b => !b)} />
+      {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => { setHand(!hand); getSocket().emit('toggle-status', { hand: !hand }) }} />}
+      <button onClick={toggleFull} className="squish grid h-12 w-12 place-items-center rounded-full bg-gray-100 border-2 border-[var(--card-line)] text-gray-700" title={full ? 'Exit full screen' : 'Full screen'}>
+        {full ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+      </button>
+      <IconToggle on={false} onIcon={PhoneOff} offIcon={PhoneOff} label="Leave" onClick={() => setLeft(true)} danger />
+    </div>
+  )
+
+  const renderCamStrip = () => (
+    <div className="flex gap-4 overflow-x-auto pb-2 shrink-0" style={{ height: 160 }}>
+      {/* Self */}
+      <div className="shrink-0 w-64 rounded-2xl overflow-hidden bg-black relative border-2 border-[var(--card-line)] shadow-sm">
+        {cam && localStream ? <VideoPlayer stream={localStream} muted={true} /> : <div className="absolute inset-0 bg-gray-100 flex items-center justify-center"><VideoOff className="text-gray-400" size={32} /></div>}
+        <div className="absolute bottom-2 left-2 right-2 bg-black/60 rounded px-3 py-1.5 text-sm font-bold text-white flex items-center justify-between">
+          <span className="truncate">{name} (You) {hand && '✋'}</span>
+          {!mic && <MicOff size={16} />}
+        </div>
+      </div>
+      {/* Peers */}
+      {Object.entries(peers).map(([id, p]) => (
+        <div key={id} className="shrink-0 w-64 rounded-2xl overflow-hidden bg-black relative border-2 border-[var(--card-line)] shadow-sm">
+          {p.stream && !p.camOff ? <VideoPlayer stream={p.stream} /> : <div className="absolute inset-0 bg-gray-100 flex items-center justify-center"><VideoOff className="text-gray-400" size={32} /></div>}
+          <div className="absolute bottom-2 left-2 right-2 bg-black/60 rounded px-3 py-1.5 text-sm font-bold text-white flex items-center justify-between">
+            <span className="truncate">{p.n}</span>
+            {p.muted && <MicOff size={16} />}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
+  const renderChat = () => (
+    <Card className="flex-1 flex flex-col p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Chat</h3>
+        <Pill>{Object.keys(peers).length + 1} here</Pill>
+      </div>
+      <div className="flex-1 min-h-[200px] overflow-y-auto flex flex-col-reverse space-y-2 space-y-reverse mb-4 pr-2">
+        {chat.map((c, i) => <p key={i} className="text-sm font-bold leading-relaxed bg-gray-50 p-2.5 rounded-xl"><span style={{ color: 'var(--honey-deep)' }}>{c.who}:</span> <span style={{ color: 'var(--ink)' }}>{c.msg}</span></p>)}
+      </div>
+      <div className="flex gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Say hi…" className="w-full rounded-full px-5 py-2.5 font-bold outline-none" style={inputStyle} />
+        <button onClick={send} className="squish grid h-12 w-12 shrink-0 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Send size={18} strokeWidth={2.6} /></button>
+      </div>
+    </Card>
+  )
+
+  if (board) {
+    return (
+      <div ref={wrap} className={`flex flex-col gap-4 ${full ? 'fixed inset-0 z-50 p-4' : 'h-[85vh]'}`} style={full ? { background: 'var(--bg)' } : undefined}>
+        {renderCamStrip()}
+        <div className="flex-1 min-h-0 flex gap-6">
+          <div className="flex-1 relative rounded-[28px] overflow-hidden border-[3px] border-[var(--card-line)] shadow-xl bg-white">
+            <InteractiveWhiteboard courseId={courseId} />
+            {renderControls(true)}
+          </div>
+          {!full && (
+            <div className="w-80 shrink-0 flex flex-col">
+              {renderChat()}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div ref={wrap} className={`grid gap-6 lg:grid-cols-[1.6fr_1fr] ${full ? 'overflow-y-auto p-6' : ''}`} style={full ? { background: 'var(--bg)' } : undefined}>
-      <Card>
-        <div className="mb-2 flex items-center justify-between">
+    <div ref={wrap} className={`grid gap-6 lg:grid-cols-[1.6fr_1fr] ${full ? 'fixed inset-0 z-50 p-6 overflow-y-auto' : ''}`} style={full ? { background: 'var(--bg)' } : undefined}>
+      <Card className="flex flex-col">
+        <div className="mb-4 flex items-center justify-between">
           <Pill>{isTutor ? 'You are the host' : 'Live session'}</Pill>
           <div className="flex items-center gap-3">
             {locked && <span className="flex items-center gap-1 text-sm font-extrabold" style={{ color: 'var(--honey-deep)' }}><Lock size={16} /> Locked</span>}
-            <button onClick={toggleFull} className="squish grid h-9 w-9 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink)' }} title={full ? 'Exit full screen' : 'Full screen'}>
-              {full ? <Minimize2 size={16} strokeWidth={2.6} /> : <Maximize2 size={16} strokeWidth={2.6} />}
+            <button onClick={toggleFull} className="squish grid h-10 w-10 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink)' }} title={full ? 'Exit full screen' : 'Full screen'}>
+              {full ? <Minimize2 size={18} strokeWidth={2.6} /> : <Maximize2 size={18} strokeWidth={2.6} />}
             </button>
           </div>
         </div>
-        <div className="mb-5 grid place-items-center rounded-[22px] overflow-hidden" style={{ minHeight: 260, background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
+        <div className="mb-6 flex-1 grid place-items-center rounded-[24px] overflow-hidden relative" style={{ minHeight: 400, background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
           {cam && localStream ? (
             <VideoPlayer stream={localStream} muted={true} />
           ) : (
             <div className="text-center">
-              <div className="mb-2 flex justify-center">{share ? <MonitorUp size={64} strokeWidth={2.2} color="var(--honey-deep)" /> : <VideoOff size={64} strokeWidth={2.2} color="var(--ink-soft)" />}</div>
-              <p className="text-2xl font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>{share ? 'Screen sharing' : 'Camera off'}</p>
+              <div className="mb-3 flex justify-center"><VideoOff size={72} strokeWidth={2.2} color="var(--ink-soft)" /></div>
+              <p className="text-3xl font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>Camera off</p>
             </div>
           )}
         </div>
-        <div className="flex flex-wrap justify-center gap-5">
-          <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Camera" onClick={toggleCam} />
-          <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={toggleMic} />
-          <IconToggle on={share} onIcon={MonitorUp} offIcon={MonitorUp} label="Share" onClick={toggleShare} />
-          <IconToggle on={board} onIcon={PenTool} offIcon={PenTool} label="Board" onClick={() => setBoard(b => !b)} />
-          {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => { setHand(!hand); getSocket().emit('toggle-status', { hand: !hand }) }} />}
-          <IconToggle on={false} onIcon={PhoneOff} offIcon={PhoneOff} label="Leave" onClick={() => setLeft(true)} danger />
-        </div>
+        {renderControls(false)}
       </Card>
-      
-      {board && (
-        <div className="col-span-full h-[80vh]">
-          <InteractiveWhiteboard courseId={courseId} isTutor={isTutor} />
-        </div>
-      )}
 
-      <div className="space-y-6">
+      <div className="space-y-6 flex flex-col h-[85vh]">
         <Card>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{isTutor ? 'Host controls' : 'In the room'}</h3>
             <Pill>{Object.keys(peers).length + 1} here</Pill>
           </div>
-          <div className="mb-4 space-y-2 max-h-60 overflow-y-auto">
+          <div className="mb-4 space-y-2 max-h-60 overflow-y-auto pr-2">
             {/* Self */}
-            <div className="flex items-center justify-between rounded-2xl px-4 py-2.5" style={{ background: 'var(--bg-soft)' }}>
-              <span className="font-extrabold">{name} (You) {hand && '✋'}</span>
-              <span style={{ color: 'var(--ink-soft)' }}>{!mic ? <MicOff size={18} /> : <Mic size={18} />}</span>
+            <div className="flex items-center justify-between rounded-2xl px-4 py-3" style={{ background: 'var(--bg-soft)' }}>
+              <span className="font-extrabold text-lg">{name} (You) {hand && '✋'}</span>
+              <span style={{ color: 'var(--ink-soft)' }}>{!mic ? <MicOff size={20} /> : <Mic size={20} />}</span>
             </div>
             {/* Peers */}
             {Object.entries(peers).map(([id, p]) => (
-              <div key={id} className="rounded-2xl overflow-hidden mb-2" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)' }}>
+              <div key={id} className="rounded-2xl overflow-hidden mb-3" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)' }}>
                 {p.stream && !p.camOff ? (
-                  <div className="h-32 bg-black"><VideoPlayer stream={p.stream} /></div>
+                  <div className="h-40 bg-black"><VideoPlayer stream={p.stream} /></div>
                 ) : null}
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <span className="font-extrabold">{p.n}</span>
-                  <span style={{ color: 'var(--ink-soft)' }}>{p.muted ? <MicOff size={18} /> : <Mic size={18} />}</span>
+                <div className="flex items-center justify-between px-4 py-3 bg-white/50">
+                  <span className="font-extrabold text-lg">{p.n}</span>
+                  <span style={{ color: 'var(--ink-soft)' }}>{p.muted ? <MicOff size={20} /> : <Mic size={20} />}</span>
                 </div>
               </div>
             ))}
           </div>
-          {isTutor && <Btn tone={locked ? 'grape' : 'honey'} onClick={() => setLocked((v) => !v)}>{locked ? <LockOpen size={18} /> : <Lock size={18} />}{locked ? 'Unlock room' : 'Lock room'}</Btn>}
+          {isTutor && <Btn tone={locked ? 'grape' : 'honey'} onClick={() => setLocked((v) => !v)} className="w-full justify-center">{locked ? <LockOpen size={18} /> : <Lock size={18} />}{locked ? 'Unlock room' : 'Lock room'}</Btn>}
         </Card>
-        <Card>
-          <h3 className="mb-3 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Chat</h3>
-          <div className="mb-3 max-h-40 space-y-2 overflow-y-auto flex-col-reverse">{chat.map((c, i) => <p key={i} className="text-sm font-bold"><span style={{ color: 'var(--honey-deep)' }}>{c.who}:</span> <span style={{ color: 'var(--ink)' }}>{c.msg}</span></p>)}</div>
-          <div className="flex gap-2">
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Say hi…" className="w-full rounded-full px-4 py-2 font-bold outline-none" style={inputStyle} />
-            <button onClick={send} className="squish grid h-11 w-11 shrink-0 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Send size={18} strokeWidth={2.6} /></button>
-          </div>
-        </Card>
+        {renderChat()}
       </div>
     </div>
   )

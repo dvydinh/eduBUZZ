@@ -146,6 +146,23 @@ io.on("connection", (socket) => {
       socket.to(roomId).emit("wb-page", pageNum);
     });
 
+    socket.on("wb-type-live", (roomId: string, data: any) => {
+      socket.to(roomId).emit("wb-type-live", data);
+    });
+
+    socket.on("wb-type-end", (roomId: string, id: string) => {
+      socket.to(roomId).emit("wb-type-end", id);
+    });
+
+    socket.on("wb-request-state-broadcast", (roomId: string) => {
+      // Find one user in the room to request state from (except the requester)
+      socket.to(roomId).emit("wb-request-state", socket.id);
+    });
+
+    socket.on("wb-sync-state", (toId: string, state: any) => {
+      io.to(toId).emit("wb-sync-state", state);
+    });
+
     socket.on("leave-room", (room: string) => {
       socket.leave(room);
       socket.to(room).emit("user-left", socket.id);
