@@ -454,115 +454,83 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
   }, [courseId, name])
 
   const toggleCam = async () => {
-    if (!cam && !localStream) {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: !mic ? false : true })
-          localStreamRef.current = stream
-          setLocalStream(stream)
-          setCam(true)
-          getSocket().emit('toggle-status', { camOff: false })
-          stream.getAudioTracks().forEach(t => t.enabled = mic)
-          
-          const videoTrack = stream.getVideoTracks()[0]
-          if (videoTrack) {
-            Object.values(pcsRef.current).forEach(pc => {
-              const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-              if (sender) sender.replaceTrack(videoTrack)
-              else pc.addTrack(videoTrack, stream)
-            })
-          }
-        } catch (err) {
-          alert("Could not access camera.")
-        }
-      } else {
-        alert("Camera not supported (requires HTTPS/localhost).")
-      }
-      return
-    }
-
     const next = !cam
     setCam(next)
     getSocket().emit('toggle-status', { camOff: !next })
 
-    if (localStream) {
-      if (!next) {
+    if (next) {
+      // Turning ON
+      try {
+        const vStream = await navigator.mediaDevices.getUserMedia({ video: true })
+        const vTrack = vStream.getVideoTracks()[0]
+        
+        let targetStream = localStream
+        if (!targetStream) {
+          targetStream = new MediaStream()
+          localStreamRef.current = targetStream
+        }
+        targetStream.addTrack(vTrack)
+        setLocalStream(new MediaStream(targetStream.getTracks()))
+
+        Object.values(pcsRef.current).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) sender.replaceTrack(vTrack)
+          else pc.addTrack(vTrack, targetStream!)
+        })
+      } catch (err) {
+        setCam(false)
+        getSocket().emit('toggle-status', { camOff: true })
+        alert("Could not access camera.")
+      }
+    } else {
+      // Turning OFF
+      if (localStream) {
         localStream.getVideoTracks().forEach(t => {
           t.stop()
           localStream.removeTrack(t)
         })
         setLocalStream(new MediaStream(localStream.getTracks()))
-      } else {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-          const newTrack = stream.getVideoTracks()[0]
-          localStream.addTrack(newTrack)
-          setLocalStream(new MediaStream(localStream.getTracks()))
-          Object.values(pcsRef.current).forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-            if (sender) sender.replaceTrack(newTrack)
-            else pc.addTrack(newTrack, localStream)
-          })
-        } catch (err) {
-          setCam(false)
-        }
       }
     }
   }
 
   const toggleMic = async () => {
-    if (!mic && !localStream) {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: !cam ? false : true, audio: true })
-          localStreamRef.current = stream
-          setLocalStream(stream)
-          setMic(true)
-          getSocket().emit('toggle-status', { muted: false })
-          stream.getVideoTracks().forEach(t => t.enabled = cam)
-          
-          const audioTrack = stream.getAudioTracks()[0]
-          if (audioTrack) {
-            Object.values(pcsRef.current).forEach(pc => {
-              const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
-              if (sender) sender.replaceTrack(audioTrack)
-              else pc.addTrack(audioTrack, stream)
-            })
-          }
-        } catch (err) {
-          alert("Could not access microphone.")
-        }
-      } else {
-        alert("Microphone not supported (requires HTTPS/localhost).")
-      }
-      return
-    }
-
     const next = !mic
     setMic(next)
     getSocket().emit('toggle-status', { muted: !next })
 
-    if (localStream) {
-      if (!next) {
+    if (next) {
+      // Turning ON
+      try {
+        const aStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const aTrack = aStream.getAudioTracks()[0]
+        
+        let targetStream = localStream
+        if (!targetStream) {
+          targetStream = new MediaStream()
+          localStreamRef.current = targetStream
+        }
+        targetStream.addTrack(aTrack)
+        setLocalStream(new MediaStream(targetStream.getTracks()))
+
+        Object.values(pcsRef.current).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+          if (sender) sender.replaceTrack(aTrack)
+          else pc.addTrack(aTrack, targetStream!)
+        })
+      } catch (err) {
+        setMic(false)
+        getSocket().emit('toggle-status', { muted: true })
+        alert("Could not access microphone.")
+      }
+    } else {
+      // Turning OFF
+      if (localStream) {
         localStream.getAudioTracks().forEach(t => {
           t.stop()
           localStream.removeTrack(t)
         })
         setLocalStream(new MediaStream(localStream.getTracks()))
-      } else {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-          const newTrack = stream.getAudioTracks()[0]
-          localStream.addTrack(newTrack)
-          setLocalStream(new MediaStream(localStream.getTracks()))
-          Object.values(pcsRef.current).forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
-            if (sender) sender.replaceTrack(newTrack)
-            else pc.addTrack(newTrack, localStream)
-          })
-        } catch (err) {
-          setMic(false)
-        }
       }
     }
   }
