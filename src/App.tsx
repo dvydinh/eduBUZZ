@@ -368,15 +368,20 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     const socket = getSocket()
     socket.connect()
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
-      localStreamRef.current = stream
-      setLocalStream(stream)
-      
-      socket.emit('join-room', courseId, { name, muted: !mic, camOff: !cam })
-    }).catch(err => {
-      console.error("Failed to get local stream", err)
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+        localStreamRef.current = stream
+        setLocalStream(stream)
+        
+        socket.emit('join-room', courseId, { name, muted: !mic, camOff: !cam })
+      }).catch(err => {
+        console.error("Failed to get local stream", err)
+        socket.emit('join-room', courseId, { name, muted: true, camOff: true })
+      })
+    } else {
+      console.warn("getUserMedia not supported (requires HTTPS or localhost)")
       socket.emit('join-room', courseId, { name, muted: true, camOff: true })
-    })
+    }
 
     const createPeer = (id: string, n: string) => {
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
@@ -447,7 +452,36 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     }
   }, [courseId, name])
 
-  const toggleCam = () => {
+  const toggleCam = async () => {
+    if (!cam && !localStream) {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: !mic ? false : true })
+          localStreamRef.current = stream
+          setLocalStream(stream)
+          setCam(true)
+          getSocket().emit('toggle-status', { camOff: false })
+          // If we also get mic, make sure it's enabled according to the state
+          stream.getAudioTracks().forEach(t => t.enabled = mic)
+          
+          // Replace video tracks on existing peer connections
+          const videoTrack = stream.getVideoTracks()[0]
+          if (videoTrack) {
+            Object.values(pcsRef.current).forEach(pc => {
+              const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+              if (sender) sender.replaceTrack(videoTrack)
+              else pc.addTrack(videoTrack, stream)
+            })
+          }
+        } catch (err) {
+          alert("Could not access camera.")
+        }
+      } else {
+        alert("Camera not supported (requires HTTPS/localhost).")
+      }
+      return
+    }
+
     const next = !cam
     setCam(next)
     if (localStream) {
@@ -456,11 +490,38 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     }
   }
 
-  const toggleMic = () => {
+  const toggleMic = async () => {
+    if (!mic && !localStream) {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: !cam ? false : true, audio: true })
+          localStreamRef.current = stream
+          setLocalStream(stream)
+          setMic(true)
+          getSocket().emit('toggle-status', { muted: false })
+          stream.getVideoTracks().forEach(t => t.enabled = cam)
+          
+          const audioTrack = stream.getAudioTracks()[0]
+          if (audioTrack) {
+            Object.values(pcsRef.current).forEach(pc => {
+              const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+              if (sender) sender.replaceTrack(audioTrack)
+              else pc.addTrack(audioTrack, stream)
+            })
+          }
+        } catch (err) {
+          alert("Could not access microphone.")
+        }
+      } else {
+        alert("Microphone not supported (requires HTTPS/localhost).")
+      }
+      return
+    }
+
     const next = !mic
     setMic(next)
     if (localStream) {
-      localStream.getAudioTracks().forEach(t => t.enabled = next)
+      localStream.getAudioTracks().forEach(t => t.enabled = !next)
       getSocket().emit('toggle-status', { muted: !next })
     }
   }
@@ -468,6 +529,10 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
   const toggleShare = async () => {
     if (!share) {
       try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          alert('Screen sharing is not supported in this browser (requires HTTPS/localhost).')
+          return
+        }
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
         setShare(true)
         screenStreamRef.current = stream
