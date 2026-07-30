@@ -474,10 +474,8 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
           setLocalStream(stream)
           setCam(true)
           getSocket().emit('toggle-status', { camOff: false })
-          // If we also get mic, make sure it's enabled according to the state
           stream.getAudioTracks().forEach(t => t.enabled = mic)
           
-          // Replace video tracks on existing peer connections
           const videoTrack = stream.getVideoTracks()[0]
           if (videoTrack) {
             Object.values(pcsRef.current).forEach(pc => {
@@ -497,9 +495,30 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
 
     const next = !cam
     setCam(next)
+    getSocket().emit('toggle-status', { camOff: !next })
+
     if (localStream) {
-      localStream.getVideoTracks().forEach(t => t.enabled = next)
-      getSocket().emit('toggle-status', { camOff: !next })
+      if (!next) {
+        localStream.getVideoTracks().forEach(t => {
+          t.stop()
+          localStream.removeTrack(t)
+        })
+        setLocalStream(new MediaStream(localStream.getTracks()))
+      } else {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+          const newTrack = stream.getVideoTracks()[0]
+          localStream.addTrack(newTrack)
+          setLocalStream(new MediaStream(localStream.getTracks()))
+          Object.values(pcsRef.current).forEach(pc => {
+            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+            if (sender) sender.replaceTrack(newTrack)
+            else pc.addTrack(newTrack, localStream)
+          })
+        } catch (err) {
+          setCam(false)
+        }
+      }
     }
   }
 
@@ -533,9 +552,30 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
 
     const next = !mic
     setMic(next)
+    getSocket().emit('toggle-status', { muted: !next })
+
     if (localStream) {
-      localStream.getAudioTracks().forEach(t => t.enabled = !next)
-      getSocket().emit('toggle-status', { muted: !next })
+      if (!next) {
+        localStream.getAudioTracks().forEach(t => {
+          t.stop()
+          localStream.removeTrack(t)
+        })
+        setLocalStream(new MediaStream(localStream.getTracks()))
+      } else {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          const newTrack = stream.getAudioTracks()[0]
+          localStream.addTrack(newTrack)
+          setLocalStream(new MediaStream(localStream.getTracks()))
+          Object.values(pcsRef.current).forEach(pc => {
+            const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+            if (sender) sender.replaceTrack(newTrack)
+            else pc.addTrack(newTrack, localStream)
+          })
+        } catch (err) {
+          setMic(false)
+        }
+      }
     }
   }
 
