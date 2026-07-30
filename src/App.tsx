@@ -335,7 +335,7 @@ function VideoPlayer({ stream, muted }: { stream?: MediaStream; muted?: boolean 
 type Peer = { n: string; muted: boolean; camOff: boolean; stream?: MediaStream }
 
 function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; courseId: string }) {
-  const [cam, setCam] = useState(true)
+  const [cam, setCam] = useState(false)
   const [mic, setMic] = useState(true)
   const [locked, setLocked] = useState(false)
   const [share, setShare] = useState(false)
@@ -382,7 +382,7 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     socket.connect()
 
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+      navigator.mediaDevices.getUserMedia({ video: false, audio: true }).then((stream) => {
         localStreamRef.current = stream
         setLocalStream(stream)
         
