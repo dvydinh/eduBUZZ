@@ -100,11 +100,50 @@ app.use(
 /*  Start                                                              */
 /* ------------------------------------------------------------------ */
 
+import { createServer } from "node:http";
+import { Server as SocketIOServer } from "socket.io";
+
+const httpServer = createServer(app);
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+  }
+});
+
+io.on("connection", (socket) => {
+  socket.on("join-room", (roomId: string, user: { name: string; muted: boolean; camOff: boolean }) => {
+    socket.join(roomId);
+    
+    // Tell others in room that a new user joined
+    socket.to(roomId).emit("user-joined", socket.id, user);
+
+    // Relay WebRTC signaling messages
+    socket.on("signal", (toId: string, signalData: any) => {
+      io.to(toId).emit("signal", socket.id, signalData);
+    });
+
+    // Relay chat messages
+    socket.on("chat-message", (msg: { who: string; msg: string }) => {
+      io.to(roomId).emit("chat-message", msg);
+    });
+
+    // Relay status toggles (mute, cam, hand)
+    socket.on("toggle-status", (status: { muted?: boolean; camOff?: boolean; hand?: boolean }) => {
+      socket.to(roomId).emit("toggle-status", socket.id, status);
+    });
+
+    socket.on("disconnect", () => {
+      socket.to(roomId).emit("user-left", socket.id);
+    });
+  });
+});
+
 async function start() {
   await seedIfEmpty();
 
-  app.listen(PORT, () => {
-    console.log(`🐝 eduBUZZ API running on http://localhost:${PORT}`);
+  httpServer.listen(PORT, () => {
+    console.log(`🐝 eduBUZZ API & WebRTC Signaling running on http://localhost:${PORT}`);
     console.log(`   Security: JWT httpOnly cookies, bcrypt, role-based access`);
     console.log(`   Demo accounts: student@edubuzz.app / tutor@edubuzz.app (pw: demo1234)`);
   });

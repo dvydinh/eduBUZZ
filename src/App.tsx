@@ -1,4 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { io, Socket } from 'socket.io-client'
+
+let socketInstance: Socket | null = null
+function getSocket() {
+  if (!socketInstance) socketInstance = io({ path: '/socket.io/', autoConnect: false })
+  return socketInstance
+}
 import {
   Video,
   VideoOff,
@@ -313,18 +320,39 @@ function HoneyEdge() {
 
 /* -------------------------------- Meeting --------------------------------- */
 
-function Meeting({ isTutor, name }: { isTutor: boolean; name: string }) {
+function VideoPlayer({ stream, muted }: { stream?: MediaStream; muted?: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    if (ref.current && stream) {
+      ref.current.srcObject = stream
+    }
+  }, [stream])
+  return <video ref={ref} autoPlay playsInline muted={muted} className="h-full w-full object-cover rounded-2xl" />
+}
+
+type Peer = { n: string; muted: boolean; camOff: boolean; stream?: MediaStream }
+
+function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; courseId: string }) {
   const [cam, setCam] = useState(true)
   const [mic, setMic] = useState(true)
   const [locked, setLocked] = useState(false)
   const [share, setShare] = useState(false)
   const [hand, setHand] = useState(false)
   const [left, setLeft] = useState(false)
-  const [seats, setSeats] = useState([{ n: 'Maya', muted: false }, { n: 'Leo', muted: true }, { n: 'Ivy', muted: false }, { n: name, muted: false }])
-  const [chat, setChat] = useState([{ who: 'Maya', msg: 'ready! 🐝' }, { who: 'Leo', msg: 'can you share the slides?' }])
+
+  const [peers, setPeers] = useState<Record<string, Peer>>({})
+  const [chat, setChat] = useState<{ who: string; msg: string }[]>([])
   const [draft, setDraft] = useState('')
+
   const wrap = useRef<HTMLDivElement>(null)
   const [full, setFull] = useState(false)
+
+  const localStreamRef = useRef<MediaStream | null>(null)
+  const pcsRef = useRef<Record<string, RTCPeerConnection>>({})
+  const screenStreamRef = useRef<MediaStream | null>(null)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+
+  // Fullscreen logic
   useEffect(() => {
     const onChange = () => setFull(document.fullscreenElement === wrap.current)
     document.addEventListener('fullscreenchange', onChange)
@@ -334,20 +362,163 @@ function Meeting({ isTutor, name }: { isTutor: boolean; name: string }) {
     if (document.fullscreenElement) document.exitFullscreen()
     else wrap.current?.requestFullscreen?.()
   }
+
+  // WebRTC Setup
+  useEffect(() => {
+    const socket = getSocket()
+    socket.connect()
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+      localStreamRef.current = stream
+      setLocalStream(stream)
+      
+      socket.emit('join-room', courseId, { name, muted: !mic, camOff: !cam })
+    }).catch(err => {
+      console.error("Failed to get local stream", err)
+      socket.emit('join-room', courseId, { name, muted: true, camOff: true })
+    })
+
+    const createPeer = (id: string, n: string) => {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+      pcsRef.current[id] = pc
+
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!))
+      }
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) socket.emit('signal', id, { type: 'candidate', candidate: e.candidate })
+      }
+
+      pc.ontrack = (e) => {
+        setPeers(prev => ({ ...prev, [id]: { ...prev[id], stream: e.streams[0] } }))
+      }
+
+      return pc
+    }
+
+    socket.on('user-joined', async (id: string, user: any) => {
+      setPeers(prev => ({ ...prev, [id]: { n: user.name, muted: user.muted, camOff: user.camOff } }))
+      const pc = createPeer(id, user.name)
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      socket.emit('signal', id, { type: 'offer', offer })
+    })
+
+    socket.on('signal', async (id: string, data: any) => {
+      let pc = pcsRef.current[id]
+      if (data.type === 'offer') {
+        setPeers(prev => ({ ...prev, [id]: prev[id] || { n: 'User', muted: false, camOff: false } }))
+        pc = createPeer(id, 'User')
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        socket.emit('signal', id, { type: 'answer', answer })
+      } else if (data.type === 'answer') {
+        await pc?.setRemoteDescription(new RTCSessionDescription(data.answer))
+      } else if (data.type === 'candidate') {
+        await pc?.addIceCandidate(new RTCIceCandidate(data.candidate))
+      }
+    })
+
+    socket.on('user-left', (id: string) => {
+      pcsRef.current[id]?.close()
+      delete pcsRef.current[id]
+      setPeers(prev => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    })
+
+    socket.on('chat-message', (msg: any) => setChat(c => [...c, msg]))
+    socket.on('toggle-status', (id: string, status: any) => {
+      setPeers(prev => prev[id] ? { ...prev, [id]: { ...prev[id], ...status } } : prev)
+    })
+
+    return () => {
+      socket.off('user-joined')
+      socket.off('signal')
+      socket.off('user-left')
+      socket.off('chat-message')
+      socket.off('toggle-status')
+      Object.values(pcsRef.current).forEach(pc => pc.close())
+      localStreamRef.current?.getTracks().forEach(t => t.stop())
+    }
+  }, [courseId, name])
+
+  const toggleCam = () => {
+    const next = !cam
+    setCam(next)
+    if (localStream) {
+      localStream.getVideoTracks().forEach(t => t.enabled = next)
+      getSocket().emit('toggle-status', { camOff: !next })
+    }
+  }
+
+  const toggleMic = () => {
+    const next = !mic
+    setMic(next)
+    if (localStream) {
+      localStream.getAudioTracks().forEach(t => t.enabled = next)
+      getSocket().emit('toggle-status', { muted: !next })
+    }
+  }
+
+  const toggleShare = async () => {
+    if (!share) {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+        setShare(true)
+        screenStreamRef.current = stream
+        const videoTrack = stream.getVideoTracks()[0]
+        Object.values(pcsRef.current).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) sender.replaceTrack(videoTrack)
+        })
+        videoTrack.onended = () => {
+          setShare(false)
+          const camTrack = localStreamRef.current?.getVideoTracks()[0]
+          if (camTrack) {
+            Object.values(pcsRef.current).forEach(pc => {
+              const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+              if (sender) sender.replaceTrack(camTrack)
+            })
+          }
+        }
+      } catch { /* ignore */ }
+    } else {
+      setShare(false)
+      screenStreamRef.current?.getTracks().forEach(t => t.stop())
+      const camTrack = localStreamRef.current?.getVideoTracks()[0]
+      if (camTrack) {
+        Object.values(pcsRef.current).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) sender.replaceTrack(camTrack)
+        })
+      }
+    }
+  }
+
   const send = () => {
     if (!draft.trim()) return
-    setChat((c) => [...c, { who: name, msg: draft.trim() }])
+    const msg = { who: name, msg: draft.trim() }
+    setChat(c => [...c, msg])
+    getSocket().emit('chat-message', msg)
     setDraft('')
   }
-  const toggleMute = (n2: string) => setSeats((s) => s.map((p) => (p.n === n2 ? { ...p, muted: !p.muted } : p)))
+
+  const toggleMute = (n2: string) => alert('Cannot force mute peers yet.')
+
   if (left)
     return (
       <Card className="text-center">
         <div className="mb-3 flex justify-center"><Bee size={80} /></div>
         <h3 className="mb-4 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>You left the meeting</h3>
-        <Btn onClick={() => setLeft(false)}>Re-join</Btn>
+        <Btn onClick={() => { setLeft(false); window.location.reload(); }}>Re-join</Btn>
       </Card>
     )
+
   return (
     <div ref={wrap} className={`grid gap-6 lg:grid-cols-[1.6fr_1fr] ${full ? 'overflow-y-auto p-6' : ''}`} style={full ? { background: 'var(--bg)' } : undefined}>
       <Card>
@@ -360,17 +531,21 @@ function Meeting({ isTutor, name }: { isTutor: boolean; name: string }) {
             </button>
           </div>
         </div>
-        <div className="mb-5 grid place-items-center rounded-[22px] text-center" style={{ minHeight: 260, background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
-          <div>
-            <div className="mb-2 flex justify-center">{share ? <MonitorUp size={64} strokeWidth={2.2} color="var(--honey-deep)" /> : cam ? <Bee size={72} /> : <VideoOff size={64} strokeWidth={2.2} color="var(--ink-soft)" />}</div>
-            <p className="text-2xl font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>{share ? 'Screen sharing' : cam ? 'Camera on' : 'Camera off'}</p>
-          </div>
+        <div className="mb-5 grid place-items-center rounded-[22px] overflow-hidden" style={{ minHeight: 260, background: 'var(--bg-soft)', border: '3px dashed var(--card-line)' }}>
+          {cam && localStream ? (
+            <VideoPlayer stream={localStream} muted={true} />
+          ) : (
+            <div className="text-center">
+              <div className="mb-2 flex justify-center">{share ? <MonitorUp size={64} strokeWidth={2.2} color="var(--honey-deep)" /> : <VideoOff size={64} strokeWidth={2.2} color="var(--ink-soft)" />}</div>
+              <p className="text-2xl font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>{share ? 'Screen sharing' : 'Camera off'}</p>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap justify-center gap-5">
-          <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Camera" onClick={() => setCam((v) => !v)} />
-          <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={() => setMic((v) => !v)} />
-          <IconToggle on={share} onIcon={MonitorUp} offIcon={MonitorUp} label="Share" onClick={() => setShare((v) => !v)} />
-          {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => setHand((v) => !v)} />}
+          <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Camera" onClick={toggleCam} />
+          <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={toggleMic} />
+          <IconToggle on={share} onIcon={MonitorUp} offIcon={MonitorUp} label="Share" onClick={toggleShare} />
+          {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => { setHand(!hand); getSocket().emit('toggle-status', { hand: !hand }) }} />}
           <IconToggle on={false} onIcon={PhoneOff} offIcon={PhoneOff} label="Leave" onClick={() => setLeft(true)} danger />
         </div>
       </Card>
@@ -378,17 +553,24 @@ function Meeting({ isTutor, name }: { isTutor: boolean; name: string }) {
         <Card>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{isTutor ? 'Host controls' : 'In the room'}</h3>
-            <Pill>{seats.length} here</Pill>
+            <Pill>{Object.keys(peers).length + 1} here</Pill>
           </div>
-          <div className="mb-4 space-y-2">
-            {seats.map((s) => (
-              <div key={s.n} className="flex items-center justify-between rounded-2xl px-4 py-2.5" style={{ background: 'var(--bg-soft)' }}>
-                <span className="font-extrabold">{s.n}</span>
-                {isTutor ? (
-                  <button onClick={() => toggleMute(s.n)} className="squish grid h-9 w-9 place-items-center rounded-full" style={{ background: s.muted ? '#ff9db0' : 'var(--honey)', border: '2px solid #4a3b12', color: '#4a3b12' }}>{s.muted ? <MicOff size={16} strokeWidth={2.6} /> : <Mic size={16} strokeWidth={2.6} />}</button>
-                ) : (
-                  <span style={{ color: 'var(--ink-soft)' }}>{s.muted ? <MicOff size={18} /> : <Mic size={18} />}</span>
-                )}
+          <div className="mb-4 space-y-2 max-h-60 overflow-y-auto">
+            {/* Self */}
+            <div className="flex items-center justify-between rounded-2xl px-4 py-2.5" style={{ background: 'var(--bg-soft)' }}>
+              <span className="font-extrabold">{name} (You) {hand && '✋'}</span>
+              <span style={{ color: 'var(--ink-soft)' }}>{!mic ? <MicOff size={18} /> : <Mic size={18} />}</span>
+            </div>
+            {/* Peers */}
+            {Object.entries(peers).map(([id, p]) => (
+              <div key={id} className="rounded-2xl overflow-hidden mb-2" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)' }}>
+                {p.stream && !p.camOff ? (
+                  <div className="h-32 bg-black"><VideoPlayer stream={p.stream} /></div>
+                ) : null}
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="font-extrabold">{p.n}</span>
+                  <span style={{ color: 'var(--ink-soft)' }}>{p.muted ? <MicOff size={18} /> : <Mic size={18} />}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -396,7 +578,7 @@ function Meeting({ isTutor, name }: { isTutor: boolean; name: string }) {
         </Card>
         <Card>
           <h3 className="mb-3 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Chat</h3>
-          <div className="mb-3 max-h-40 space-y-2 overflow-y-auto">{chat.map((c, i) => <p key={i} className="text-sm font-bold"><span style={{ color: 'var(--honey-deep)' }}>{c.who}:</span> <span style={{ color: 'var(--ink)' }}>{c.msg}</span></p>)}</div>
+          <div className="mb-3 max-h-40 space-y-2 overflow-y-auto flex-col-reverse">{chat.map((c, i) => <p key={i} className="text-sm font-bold"><span style={{ color: 'var(--honey-deep)' }}>{c.who}:</span> <span style={{ color: 'var(--ink)' }}>{c.msg}</span></p>)}</div>
           <div className="flex gap-2">
             <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Say hi…" className="w-full rounded-full px-4 py-2 font-bold outline-none" style={inputStyle} />
             <button onClick={send} className="squish grid h-11 w-11 shrink-0 place-items-center rounded-full" style={{ background: 'var(--honey)', border: '3px solid #4a3b12', color: '#4a3b12' }}><Send size={18} strokeWidth={2.6} /></button>
@@ -549,7 +731,7 @@ function Homework({ isTutor, courseId, list, setList }: { isTutor: boolean; cour
   }
   const toggleClose = async (id: number) => {
     try {
-      const res = await api.homework.toggleClose(id)
+      const res = await api.homework.toggleClose(id) as any
       setList((l) => l.map((x) => (x.id === id ? { ...x, status: res.status } : x)))
       setOpenId(null)
     } catch { /* ignore */ }
@@ -834,7 +1016,7 @@ function CourseWorkspace({
         ))}
       </div>
       <div key={sub}>
-        {sub === 'Meeting' && <Meeting isTutor={isTutor} name={name} />}
+        {sub === 'Meeting' && <Meeting isTutor={isTutor} name={name} courseId={course.id} />}
         {sub === 'Homework' && <Homework isTutor={isTutor} courseId={course.id} list={hw} setList={setHw} />}
         {sub === 'Quizzes' && <Quizzes isTutor={isTutor} courseId={course.id} list={quizzes} setList={setQuizzes} />}
         {sub === 'Resources' && <Resources isTutor={isTutor} courseId={course.id} list={resources} setList={setResources} />}
