@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, Socket } from 'socket.io-client'
+import { supabase } from './supabase'
 
 
 import {
@@ -8,6 +9,8 @@ import {
   Mic,
   MicOff,
   MonitorUp,
+  Monitor,
+  MonitorOff,
   Hand,
   PhoneOff,
   Lock,
@@ -234,14 +237,23 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
     setErr('')
     try {
       if (mode === 'signin') {
-        const res = await api.auth.login({ email: email.trim(), password: code })
-        onEnter(res.name, res.role as Role)
+        const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: code })
+        if (error) throw error
+        onEnter(data.user.user_metadata?.name || 'User', data.user.user_metadata?.role as Role || 'student')
       } else if (mode === 'signup') {
-        const res = await api.auth.signup({ name: name.trim(), email: email.trim(), password: code, role })
-        onEnter(res.name, res.role as Role)
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: code,
+          options: { data: { name: name.trim(), role } }
+        })
+        if (error) throw error
+        onEnter(data.user?.user_metadata?.name || name.trim(), data.user?.user_metadata?.role as Role || role)
       } else {
-        const res = await api.auth.guest({ name: name.trim(), passcode: code, role })
-        onEnter(res.name, res.role as Role)
+        const { data, error } = await supabase.auth.signInAnonymously({
+          options: { data: { name: name.trim(), role } }
+        })
+        if (error) throw error
+        onEnter(data.user?.user_metadata?.name || name.trim(), data.user?.user_metadata?.role as Role || role)
       }
     } catch (e: any) {
       setErr(e.message || 'Something went wrong')
@@ -251,26 +263,17 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
       setLoading(false)
     }
   }
-  const demoLogin = async (demoRole: Role) => {
-    setLoading(true)
-    setErr('')
-    try {
-      const res = await api.auth.login({
-        email: demoRole === 'student' ? 'student@edubuzz.app' : 'tutor@edubuzz.app',
-        password: 'demo1234',
-      })
-      onEnter(res.name, res.role as Role)
-    } catch (e: any) {
-      setErr(e.message || 'Demo login failed')
-    } finally {
-      setLoading(false)
-    }
+  const handleRoleSelect = (r: Role) => {
+    setRole(r)
+    setEmail(r === 'student' ? 'student@edubuzz.app' : 'tutor@edubuzz.app')
+    setCode('demo1234')
   }
+
   const tab = (m: typeof mode, label: string) => (
     <button onClick={() => setMode(m)} className="squish flex-1 rounded-full px-3 py-2 text-sm font-bold" style={{ fontFamily: 'var(--font-display)', background: mode === m ? '#ffcf3f' : 'transparent', color: '#4a3b12', border: mode === m ? '3px solid #4a3b12' : '3px solid transparent' }}>{label}</button>
   )
   const roleBtn = (r: Role, label: string) => (
-    <button onClick={() => setRole(r)} className="squish flex-1 rounded-2xl px-3 py-3 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: role === r ? '#a37bff' : '#fffdf4', color: role === r ? '#fff' : '#4a3b12', border: '3px solid #4a3b12' }}>{label}</button>
+    <button onClick={() => handleRoleSelect(r)} className="squish flex-1 rounded-2xl px-3 py-3 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: role === r ? '#a37bff' : '#fffdf4', color: role === r ? '#fff' : '#4a3b12', border: '3px solid #4a3b12' }}>{label}</button>
   )
   const li: React.CSSProperties = { border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }
   return (
@@ -291,10 +294,6 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
         </div>
         <div className="mt-7 space-y-3">
           <Btn onClick={submit}>{loading ? 'Loading…' : mode === 'signin' ? 'Sign in →' : mode === 'signup' ? 'Create account →' : 'Let me in →'}</Btn>
-          <div className="flex justify-center gap-2">
-            <button onClick={() => demoLogin('student')} disabled={loading} className="squish rounded-full px-4 py-2 text-sm font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#ffcf3f', color: '#4a3b12', border: '3px solid #4a3b12' }}>🐝 Demo student</button>
-            <button onClick={() => demoLogin('tutor')} disabled={loading} className="squish rounded-full px-4 py-2 text-sm font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#a37bff', color: '#fff', border: '3px solid #4a3b12' }}>🎓 Demo tutor</button>
-          </div>
         </div>
       </div>
     </div>
@@ -328,7 +327,7 @@ function VideoPlayer({ stream, muted }: { stream?: MediaStream; muted?: boolean 
   return <video ref={ref} autoPlay playsInline muted={muted} className="h-full w-full object-cover rounded-2xl" />
 }
 
-type Peer = { n: string; muted: boolean; camOff: boolean; stream?: MediaStream }
+type Peer = { n: string; muted: boolean; camOff: boolean; screen: boolean; stream?: MediaStream }
 
 function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; courseId: string }) {
   const [cam, setCam] = useState(false)
@@ -538,35 +537,51 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
           alert('Screen sharing is not supported in this browser (requires HTTPS/localhost).')
           return
         }
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
         setShare(true)
         screenStreamRef.current = stream
+        getSocket().emit('toggle-status', { screen: true })
+        
         const videoTrack = stream.getVideoTracks()[0]
+        const audioTrack = stream.getAudioTracks()[0]
+        
         Object.values(pcsRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-          if (sender) sender.replaceTrack(videoTrack)
+          const vSender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (vSender) vSender.replaceTrack(videoTrack)
+          
+          if (audioTrack) {
+            const aSender = pc.getSenders().find(s => s.track?.kind === 'audio')
+            if (aSender) aSender.replaceTrack(audioTrack)
+          }
         })
+        
         videoTrack.onended = () => {
           setShare(false)
+          getSocket().emit('toggle-status', { screen: false })
           const camTrack = localStreamRef.current?.getVideoTracks()[0]
-          if (camTrack) {
-            Object.values(pcsRef.current).forEach(pc => {
-              const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-              if (sender) sender.replaceTrack(camTrack)
-            })
-          }
+          const micTrack = localStreamRef.current?.getAudioTracks()[0]
+          Object.values(pcsRef.current).forEach(pc => {
+            const vSender = pc.getSenders().find(s => s.track?.kind === 'video')
+            if (vSender && camTrack) vSender.replaceTrack(camTrack)
+            
+            const aSender = pc.getSenders().find(s => s.track?.kind === 'audio')
+            if (aSender && micTrack) aSender.replaceTrack(micTrack)
+          })
         }
       } catch { /* ignore */ }
     } else {
       setShare(false)
+      getSocket().emit('toggle-status', { screen: false })
       screenStreamRef.current?.getTracks().forEach(t => t.stop())
       const camTrack = localStreamRef.current?.getVideoTracks()[0]
-      if (camTrack) {
-        Object.values(pcsRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-          if (sender) sender.replaceTrack(camTrack)
-        })
-      }
+      const micTrack = localStreamRef.current?.getAudioTracks()[0]
+      Object.values(pcsRef.current).forEach(pc => {
+        const vSender = pc.getSenders().find(s => s.track?.kind === 'video')
+        if (vSender && camTrack) vSender.replaceTrack(camTrack)
+        
+        const aSender = pc.getSenders().find(s => s.track?.kind === 'audio')
+        if (aSender && micTrack) aSender.replaceTrack(micTrack)
+      })
     }
   }
 
@@ -593,6 +608,7 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     <div className={`flex flex-wrap justify-center gap-3 ${overlay ? 'absolute bottom-6 left-1/2 -translate-x-1/2 p-3 bg-white/90 backdrop-blur-md rounded-full shadow-xl border-2 border-[var(--card-line)] z-50' : ''}`}>
       <IconToggle on={cam} onIcon={Video} offIcon={VideoOff} label="Cam" onClick={toggleCam} />
       <IconToggle on={mic} onIcon={Mic} offIcon={MicOff} label="Mic" onClick={toggleMic} />
+      <IconToggle on={share} onIcon={Monitor} offIcon={MonitorOff} label="Share" onClick={toggleShare} />
       <IconToggle on={board} onIcon={PenTool} offIcon={PenTool} label="Board" onClick={() => setBoard(b => !b)} />
       {!isTutor && <IconToggle on={hand} onIcon={Hand} offIcon={Hand} label="Raise" onClick={() => { setHand(!hand); getSocket().emit('toggle-status', { hand: !hand }) }} />}
       <button onClick={toggleFull} className="squish grid h-12 w-12 place-items-center rounded-full bg-gray-100 border-2 border-[var(--card-line)] text-gray-700" title={full ? 'Exit full screen' : 'Full screen'}>
@@ -602,25 +618,31 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     </div>
   )
 
-  const renderCamStrip = () => (
-    <div className="flex gap-4 overflow-x-auto pb-2 shrink-0" style={{ height: 160 }}>
+  const hasActiveCam = cam || mic || Object.values(peers).some(p => !p.camOff || !p.muted)
+
+  const renderCamColumn = () => (
+    <div className="flex flex-col gap-4 overflow-y-auto pr-2 w-64 shrink-0">
       {/* Self */}
-      <div className="shrink-0 w-64 rounded-2xl overflow-hidden bg-black relative border-2 border-[var(--card-line)] shadow-sm">
-        {cam && localStream ? <VideoPlayer stream={localStream} muted={true} /> : <div className="absolute inset-0 bg-gray-100 flex items-center justify-center"><VideoOff className="text-gray-400" size={32} /></div>}
-        <div className="absolute bottom-2 left-2 right-2 bg-black/60 rounded px-3 py-1.5 text-sm font-bold text-white flex items-center justify-between">
-          <span className="truncate">{name} (You) {hand && '✋'}</span>
-          {!mic && <MicOff size={16} />}
-        </div>
-      </div>
-      {/* Peers */}
-      {Object.entries(peers).map(([id, p]) => (
-        <div key={id} className="shrink-0 w-64 rounded-2xl overflow-hidden bg-black relative border-2 border-[var(--card-line)] shadow-sm">
-          {p.stream && !p.camOff ? <VideoPlayer stream={p.stream} /> : <div className="absolute inset-0 bg-gray-100 flex items-center justify-center"><VideoOff className="text-gray-400" size={32} /></div>}
+      {(cam || mic) && (
+        <div className="shrink-0 h-48 w-full rounded-2xl overflow-hidden bg-black relative border-2 border-[var(--card-line)] shadow-sm">
+          {cam && localStream ? <VideoPlayer stream={localStream} muted={true} /> : <div className="absolute inset-0 bg-gray-100 flex items-center justify-center"><VideoOff className="text-gray-400" size={32} /></div>}
           <div className="absolute bottom-2 left-2 right-2 bg-black/60 rounded px-3 py-1.5 text-sm font-bold text-white flex items-center justify-between">
-            <span className="truncate">{p.n}</span>
-            {p.muted && <MicOff size={16} />}
+            <span className="truncate">{name} (You) {hand && '✋'}</span>
+            {!mic && <MicOff size={16} />}
           </div>
         </div>
+      )}
+      {/* Peers */}
+      {Object.entries(peers).map(([id, p]) => (
+        (!p.camOff || p.muted === false) && (
+          <div key={id} className="shrink-0 h-48 w-full rounded-2xl overflow-hidden bg-black relative border-2 border-[var(--card-line)] shadow-sm">
+            {p.stream && !p.camOff ? <VideoPlayer stream={p.stream} /> : <div className="absolute inset-0 bg-gray-100 flex items-center justify-center"><VideoOff className="text-gray-400" size={32} /></div>}
+            <div className="absolute bottom-2 left-2 right-2 bg-black/60 rounded px-3 py-1.5 text-sm font-bold text-white flex items-center justify-between">
+              <span className="truncate">{p.n}</span>
+              {p.muted && <MicOff size={16} />}
+            </div>
+          </div>
+        )
       ))}
     </div>
   )
@@ -641,21 +663,27 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     </Card>
   )
 
-  if (board) {
+  if (board || screenStream || Object.values(peers).some(p => p.screenStream)) {
+    // Find active screen stream if any
+    const activeScreenStream = screenStream || Object.values(peers).find(p => p.screenStream)?.screenStream;
     return (
-      <div ref={wrap} className={`flex flex-col gap-4 ${full ? 'fixed inset-0 z-50 p-4' : 'h-[85vh]'}`} style={full ? { background: 'var(--bg)' } : undefined}>
-        {renderCamStrip()}
-        <div className="flex-1 min-h-0 flex gap-6">
-          <div className="flex-1 relative rounded-[28px] overflow-hidden border-[3px] border-[var(--card-line)] shadow-xl bg-white">
-            <InteractiveWhiteboard courseId={courseId} />
+      <div ref={wrap} className={`flex gap-4 ${full ? 'fixed inset-0 z-50 p-4' : 'h-[85vh]'}`} style={full ? { background: 'var(--bg)' } : undefined}>
+        <div className="flex-1 flex flex-col gap-4 min-w-0">
+          <div className="flex-1 relative rounded-[28px] overflow-hidden border-[3px] border-[var(--card-line)] shadow-xl bg-black flex items-center justify-center">
+            {activeScreenStream ? (
+              <VideoPlayer stream={activeScreenStream} className="w-full h-full object-contain" />
+            ) : (
+              <InteractiveWhiteboard courseId={courseId} />
+            )}
             {renderControls(true)}
           </div>
-          {!full && (
-            <div className="w-80 shrink-0 flex flex-col">
-              {renderChat()}
-            </div>
-          )}
         </div>
+        {!full && (
+          <div className="w-80 shrink-0 flex flex-col gap-4">
+            {hasActiveCam && renderCamColumn()}
+            {renderChat()}
+          </div>
+        )}
       </div>
     )
   }

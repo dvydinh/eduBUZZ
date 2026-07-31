@@ -10,20 +10,29 @@ const router = Router();
 /*  IMPORTANT: correct_index is NEVER sent to the client               */
 /* ------------------------------------------------------------------ */
 
-router.get("/courses/:courseId/quizzes", requireAuth, (req, res) => {
-  const quizzes = db
-    .prepare("SELECT * FROM quizzes WHERE course_id = ? ORDER BY due_day")
-    .all(req.params.courseId) as any[];
+router.get("/courses/:courseId/quizzes", requireAuth, async (req, res) => {
+  const { data: quizzes, error } = await db
+    .from("quizzes")
+    .select("*")
+    .eq("course_id", req.params.courseId)
+    .order("due_day", { ascending: true });
+
+  if (error || !quizzes) {
+    res.status(500).json({ error: "Failed to fetch quizzes" });
+    return;
+  }
 
   const userId = req.user!.userId;
 
-  const result = quizzes.map((quiz) => {
+  const result = await Promise.all(quizzes.map(async (quiz) => {
     // Get questions WITHOUT correct_index
-    const questions = db
-      .prepare("SELECT id, question, answers_json, sort_order FROM quiz_questions WHERE quiz_id = ? ORDER BY sort_order")
-      .all(quiz.id) as any[];
+    const { data: questions } = await db
+      .from("quiz_questions")
+      .select("id, question, answers_json, sort_order")
+      .eq("quiz_id", quiz.id)
+      .order("sort_order", { ascending: true });
 
-    const parsedQs = questions.map((q) => ({
+    const parsedQs = (questions || []).map((q: any) => ({
       id: q.id,
       q: q.question,
       a: JSON.parse(q.answers_json),
@@ -31,9 +40,16 @@ router.get("/courses/:courseId/quizzes", requireAuth, (req, res) => {
     }));
 
     // Get user's best score
-    const best = db
-      .prepare("SELECT MAX(score_pct) as best FROM quiz_attempts WHERE quiz_id = ? AND user_id = ?")
-      .get(quiz.id, userId) as any;
+    const { data: attempts } = await db
+      .from("quiz_attempts")
+      .select("score_pct")
+      .eq("quiz_id", quiz.id)
+      .eq("user_id", userId);
+      
+    let best = null;
+    if (attempts && attempts.length > 0) {
+      best = Math.max(...attempts.map((a: any) => a.score_pct));
+    }
 
     return {
       id: quiz.id,
@@ -44,9 +60,9 @@ router.get("/courses/:courseId/quizzes", requireAuth, (req, res) => {
       imageUrl: quiz.image_url,
       audioUrl: quiz.audio_url,
       qs: parsedQs,
-      best: best?.best ?? null,
+      best,
     };
-  });
+  }));
 
   res.json(result);
 });
@@ -71,14 +87,14 @@ const createSchema = z.object({
   questions: z.array(questionSchema).min(1).max(50),
 });
 
-router.post("/courses/:courseId/quizzes", requireAuth, requireTutor, (req, res) => {
+router.post("/courses/:courseId/quizzes", requireAuth, requireTutor, async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
     return;
   }
 
-  const course = db.prepare("SELECT id FROM courses WHERE id = ?").get(req.params.courseId);
+  const { data: course } = await db.from("courses").select("id").eq("id", req.params.courseId).maybeSingle();
   if (!course) {
     res.status(404).json({ error: "Course not found" });
     return;
@@ -86,35 +102,40 @@ router.post("/courses/:courseId/quizzes", requireAuth, requireTutor, (req, res) 
 
   const d = parsed.data;
 
-  const insertQuiz = db.prepare(
-    `INSERT INTO quizzes (course_id, title, due_day, color, image_url, audio_url, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertQuestion = db.prepare(
-    `INSERT INTO quiz_questions (quiz_id, question, answers_json, correct_index, sort_order)
-     VALUES (?, ?, ?, ?, ?)`
-  );
+  // Insert quiz
+  const { data: newQuiz, error: quizError } = await db.from("quizzes").insert({
+    course_id: req.params.courseId,
+    title: d.title,
+    due_day: d.dueDay,
+    color: d.color,
+    image_url: d.imageUrl || null,
+    audio_url: d.audioUrl || null,
+    created_by: req.user!.userId
+  }).select("id").single();
 
-  const createQuiz = db.transaction(() => {
-    const result = insertQuiz.run(
-      req.params.courseId,
-      d.title,
-      d.dueDay,
-      d.color,
-      d.imageUrl || null,
-      d.audioUrl || null,
-      req.user!.userId
-    );
-    const quizId = result.lastInsertRowid as number;
+  if (quizError || !newQuiz) {
+    res.status(500).json({ error: "Failed to create quiz" });
+    return;
+  }
 
-    d.questions.forEach((q, i) => {
-      insertQuestion.run(quizId, q.q, JSON.stringify(q.a), q.c, i);
-    });
+  const quizId = newQuiz.id;
 
-    return quizId;
-  });
+  // Insert questions in bulk
+  const questionsToInsert = d.questions.map((q, i) => ({
+    quiz_id: quizId,
+    question: q.q,
+    answers_json: JSON.stringify(q.a),
+    correct_index: q.c,
+    sort_order: i
+  }));
 
-  const quizId = createQuiz();
+  const { error: qError } = await db.from("quiz_questions").insert(questionsToInsert);
+  if (qError) {
+    // Ideally we should rollback or delete quiz here, but keep it simple for now
+    await db.from("quizzes").delete().eq("id", quizId);
+    res.status(500).json({ error: "Failed to insert questions" });
+    return;
+  }
 
   // Return without correct_index
   res.status(201).json({
@@ -139,7 +160,7 @@ const answerSchema = z.object({
   answerIndex: z.number().int().min(0),
 });
 
-router.post("/quizzes/:id/answer", requireAuth, (req, res) => {
+router.post("/quizzes/:id/answer", requireAuth, async (req, res) => {
   const parsed = answerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -148,9 +169,12 @@ router.post("/quizzes/:id/answer", requireAuth, (req, res) => {
 
   const { questionId, answerIndex } = parsed.data;
 
-  const question = db
-    .prepare("SELECT correct_index, answers_json FROM quiz_questions WHERE id = ? AND quiz_id = ?")
-    .get(questionId, Number(req.params.id)) as any;
+  const { data: question } = await db
+    .from("quiz_questions")
+    .select("correct_index, answers_json")
+    .eq("id", questionId)
+    .eq("quiz_id", Number(req.params.id))
+    .maybeSingle();
 
   if (!question) {
     res.status(404).json({ error: "Question not found" });
@@ -176,7 +200,7 @@ const finishSchema = z.object({
   scorePct: z.number().int().min(0).max(100),
 });
 
-router.post("/quizzes/:id/finish", requireAuth, (req, res) => {
+router.post("/quizzes/:id/finish", requireAuth, async (req, res) => {
   const parsed = finishSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -184,31 +208,40 @@ router.post("/quizzes/:id/finish", requireAuth, (req, res) => {
   }
 
   const quizId = Number(req.params.id);
-  const quiz = db.prepare("SELECT id FROM quizzes WHERE id = ?").get(quizId);
+  const { data: quiz } = await db.from("quizzes").select("id").eq("id", quizId).maybeSingle();
   if (!quiz) {
     res.status(404).json({ error: "Quiz not found" });
     return;
   }
 
-  db.prepare(
-    "INSERT INTO quiz_attempts (quiz_id, user_id, score_pct) VALUES (?, ?, ?)"
-  ).run(quizId, req.user!.userId, parsed.data.scorePct);
+  await db.from("quiz_attempts").insert({
+    quiz_id: quizId,
+    user_id: req.user!.userId,
+    score_pct: parsed.data.scorePct
+  });
 
   // Return best score
-  const best = db
-    .prepare("SELECT MAX(score_pct) as best FROM quiz_attempts WHERE quiz_id = ? AND user_id = ?")
-    .get(quizId, req.user!.userId) as any;
+  const { data: attempts } = await db
+    .from("quiz_attempts")
+    .select("score_pct")
+    .eq("quiz_id", quizId)
+    .eq("user_id", req.user!.userId);
 
-  res.json({ scorePct: parsed.data.scorePct, best: best?.best ?? parsed.data.scorePct });
+  let best = parsed.data.scorePct;
+  if (attempts && attempts.length > 0) {
+     best = Math.max(...attempts.map((a: any) => a.score_pct));
+  }
+
+  res.json({ scorePct: parsed.data.scorePct, best });
 });
 
 /* ------------------------------------------------------------------ */
 /*  DELETE /api/quizzes/:id  (tutor only)                              */
 /* ------------------------------------------------------------------ */
 
-router.delete("/quizzes/:id", requireAuth, requireTutor, (req, res) => {
-  const result = db.prepare("DELETE FROM quizzes WHERE id = ?").run(Number(req.params.id));
-  if (result.changes === 0) {
+router.delete("/quizzes/:id", requireAuth, requireTutor, async (req, res) => {
+  const { error, count } = await db.from("quizzes").delete({ count: 'exact' }).eq("id", Number(req.params.id));
+  if (error || count === 0) {
     res.status(404).json({ error: "Quiz not found" });
     return;
   }

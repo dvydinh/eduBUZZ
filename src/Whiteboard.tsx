@@ -340,9 +340,11 @@ export function InteractiveWhiteboard({ courseId }: { courseId: string }) {
         }}
       >
         <div ref={containerRef} className="relative shadow-2xl bg-white" style={{ minWidth: 800, minHeight: 600 }}>
-          <canvas ref={bgCanvasRef} className="absolute inset-0 bg-white" />
+          <canvas ref={bgCanvasRef} width={800} height={600} className="absolute inset-0 bg-white" />
           <canvas 
             ref={drawCanvasRef} 
+            width={800} 
+            height={600}
             className={`absolute inset-0 z-10 touch-none ${tool === 'type' ? 'cursor-text' : 'cursor-crosshair'}`}
             onMouseDown={handleCanvasPointerDown}
             onMouseMove={handleCanvasPointerMove}

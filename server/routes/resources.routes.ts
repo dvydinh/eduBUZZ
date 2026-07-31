@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import db from "../db.js";
 import { requireAuth, requireTutor } from "../middleware.js";
+import multer from "multer";
+import path from "node:path";
 
 const router = Router();
 
@@ -9,29 +11,21 @@ const router = Router();
 /*  GET /api/courses/:courseId/resources                                */
 /* ------------------------------------------------------------------ */
 
-router.get("/courses/:courseId/resources", requireAuth, (req, res) => {
-  const rows = db
-    .prepare("SELECT * FROM resources WHERE course_id = ? ORDER BY id DESC")
-    .all(req.params.courseId);
+router.get("/courses/:courseId/resources", requireAuth, async (req, res) => {
+  const { data: rows, error } = await db
+    .from("resources")
+    .select("*")
+    .eq("course_id", req.params.courseId)
+    .order("id", { ascending: false });
+    
+  if (error || !rows) {
+    res.status(500).json({ error: "Failed to fetch resources" });
+    return;
+  }
   res.json(rows);
 });
 
-import multer from "multer";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import fs from "node:fs";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadsDir = path.join(__dirname, "..", "..", "uploads");
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
-  },
-});
+const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
 
 /* ------------------------------------------------------------------ */
@@ -39,8 +33,8 @@ const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 5
 /* ------------------------------------------------------------------ */
 
 // We allow both tutors and students to upload resources now, as students need to share PDFs on Whiteboard.
-router.post("/courses/:courseId/resources", requireAuth, upload.single("file"), (req, res) => {
-  const course = db.prepare("SELECT id FROM courses WHERE id = ?").get(req.params.courseId);
+router.post("/courses/:courseId/resources", requireAuth, upload.single("file"), async (req, res) => {
+  const { data: course } = await db.from("courses").select("id").eq("id", req.params.courseId).maybeSingle();
   if (!course) {
     res.status(404).json({ error: "Course not found" });
     return;
@@ -54,32 +48,60 @@ router.post("/courses/:courseId/resources", requireAuth, upload.single("file"), 
 
   const name = req.body.name || file.originalname;
   const sizeMb = (file.size / (1024 * 1024)).toFixed(1) + " MB";
-  const fileUrl = `/uploads/${file.filename}`;
 
-  const result = db
-    .prepare(
-      "INSERT INTO resources (course_id, name, size, file_url, created_by) VALUES (?, ?, ?, ?, ?)"
-    )
-    .run(req.params.courseId, name, sizeMb, fileUrl, req.user!.userId);
+  const ext = path.extname(file.originalname);
+  const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
 
-  res.status(201).json({
-    id: result.lastInsertRowid,
-    course_id: req.params.courseId,
-    name,
-    size: sizeMb,
-    file_url: fileUrl
-  });
+  // Upload to Supabase Storage
+  const { error: storageError } = await db.storage
+    .from("edubuzz-resources")
+    .upload(filename, file.buffer, {
+      contentType: file.mimetype,
+    });
+
+  if (storageError) {
+    console.error("Storage upload error:", storageError);
+    res.status(500).json({ error: "Failed to upload file to storage" });
+    return;
+  }
+
+  const { data: publicUrlData } = db.storage
+    .from("edubuzz-resources")
+    .getPublicUrl(filename);
+    
+  const fileUrl = publicUrlData.publicUrl;
+
+  const { data: result, error: dbError } = await db
+    .from("resources")
+    .insert({
+      course_id: req.params.courseId,
+      name,
+      size: sizeMb,
+      file_url: fileUrl,
+      created_by: req.user!.userId
+    })
+    .select()
+    .single();
+
+  if (dbError || !result) {
+    res.status(500).json({ error: "Failed to save resource to database" });
+    return;
+  }
+
+  res.status(201).json(result);
 });
 
 /* ------------------------------------------------------------------ */
 /*  DELETE /api/resources/:id  (tutor only)                            */
 /* ------------------------------------------------------------------ */
 
-router.delete("/resources/:id", requireAuth, requireTutor, (req, res) => {
-  const result = db
-    .prepare("DELETE FROM resources WHERE id = ?")
-    .run(Number(req.params.id));
-  if (result.changes === 0) {
+router.delete("/resources/:id", requireAuth, requireTutor, async (req, res) => {
+  const { error, count } = await db
+    .from("resources")
+    .delete({ count: 'exact' })
+    .eq("id", Number(req.params.id));
+    
+  if (error || count === 0) {
     res.status(404).json({ error: "Resource not found" });
     return;
   }
@@ -90,10 +112,17 @@ router.delete("/resources/:id", requireAuth, requireTutor, (req, res) => {
 /*  Reminders (personal, per-user)                                     */
 /* ------------------------------------------------------------------ */
 
-router.get("/reminders", requireAuth, (req, res) => {
-  const rows = db
-    .prepare("SELECT * FROM reminders WHERE user_id = ? ORDER BY day")
-    .all(req.user!.userId);
+router.get("/reminders", requireAuth, async (req, res) => {
+  const { data: rows, error } = await db
+    .from("reminders")
+    .select("*")
+    .eq("user_id", req.user!.userId)
+    .order("day", { ascending: true });
+    
+  if (error || !rows) {
+    res.status(500).json({ error: "Failed to fetch reminders" });
+    return;
+  }
   res.json(rows);
 });
 
@@ -102,18 +131,30 @@ const reminderSchema = z.object({
   label: z.string().min(1).max(300),
 });
 
-router.post("/reminders", requireAuth, (req, res) => {
+router.post("/reminders", requireAuth, async (req, res) => {
   const parsed = reminderSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
     return;
   }
   const { day, label } = parsed.data;
-  const result = db
-    .prepare("INSERT INTO reminders (user_id, day, label) VALUES (?, ?, ?)")
-    .run(req.user!.userId, day, label);
+  
+  const { data: result, error } = await db
+    .from("reminders")
+    .insert({
+      user_id: req.user!.userId,
+      day,
+      label
+    })
+    .select()
+    .single();
 
-  res.status(201).json({ id: result.lastInsertRowid, user_id: req.user!.userId, day, label });
+  if (error || !result) {
+    res.status(500).json({ error: "Failed to create reminder" });
+    return;
+  }
+
+  res.status(201).json(result);
 });
 
 export default router;

@@ -1,9 +1,9 @@
 /* ------------------------------------------------------------------ */
-/*  API fetch wrapper — credentials: 'include' for httpOnly cookies    */
-/*  All API calls go through this to ensure consistent auth handling   */
+/*  API fetch wrapper — includes Authorization Bearer token           */
 /* ------------------------------------------------------------------ */
 
 import { io, Socket } from 'socket.io-client';
+import { supabase } from './supabase';
 
 const BASE = "/api";
 
@@ -28,15 +28,31 @@ class ApiResponseError extends Error {
   }
 }
 
+async function getHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  
+  return headers;
+}
+
 async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const defaultHeaders = await getHeaders();
+  
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    credentials: "include", // always send httpOnly cookie
     headers: {
-      "Content-Type": "application/json",
+      ...defaultHeaders,
       ...options.headers,
     },
   });
@@ -53,30 +69,10 @@ async function apiFetch<T = unknown>(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Auth                                                               */
+/*  API                                                                */
 /* ------------------------------------------------------------------ */
 
 export const api = {
-  auth: {
-    signup: (body: { name: string; email: string; password: string; role: string }) =>
-      apiFetch<{ id: number; name: string; role: string }>("/auth/signup", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    login: (body: { email: string; password: string }) =>
-      apiFetch<{ id: number; name: string; role: string }>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    guest: (body: { name: string; passcode: string; role: string }) =>
-      apiFetch<{ id: number; name: string; role: string }>("/auth/guest", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    logout: () => apiFetch("/auth/logout", { method: "POST" }),
-    me: () => apiFetch<{ id: number; name: string; role: string }>("/auth/me"),
-  },
-
   /* ------------------------------------------------------------------ */
   /*  Courses                                                            */
   /* ------------------------------------------------------------------ */
@@ -150,8 +146,8 @@ export const api = {
   resources: {
     list: (courseId: string) =>
       apiFetch<any[]>(`/courses/${courseId}/resources`),
-    create: (courseId: string, body: FormData) => {
-      const headers = { ...getHeaders() };
+    create: async (courseId: string, body: FormData) => {
+      const headers = await getHeaders();
       delete headers["Content-Type"]; // let browser set boundary
       return fetch(`${BASE}/courses/${courseId}/resources`, {
         method: "POST",

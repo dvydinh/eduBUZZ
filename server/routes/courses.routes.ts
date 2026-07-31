@@ -9,30 +9,33 @@ const router = Router();
 /*  GET /api/courses                                                   */
 /* ------------------------------------------------------------------ */
 
-router.get("/", requireAuth, (req, res) => {
+router.get("/", requireAuth, async (req, res) => {
   const userId = req.user!.userId;
   const role = req.user!.role;
 
-  // We fetch all courses and mark `is_enrolled: true` if the user is enrolled (student) or is the creator (tutor)
-  const rows = db.prepare(`
-    SELECT c.*, 
-      CASE 
-        WHEN ? = 'tutor' AND c.created_by = ? THEN 1
-        WHEN ? = 'student' AND e.user_id IS NOT NULL THEN 1
-        ELSE 0
-      END as is_enrolled
-    FROM courses c
-    LEFT JOIN enrollments e ON e.course_id = c.id AND e.user_id = ?
-    ORDER BY c.rowid
-  `).all(role, userId, role, userId);
+  const { data: courses, error } = await db
+    .from("courses")
+    .select(`
+      *,
+      enrollments (user_id)
+    `)
+    .order('id', { ascending: true });
 
-  // Convert `is_enrolled` from 0/1 to boolean
-  const courses = rows.map((r: any) => ({
-    ...r,
-    is_enrolled: Boolean(r.is_enrolled)
-  }));
+  if (error || !courses) {
+    res.status(500).json({ error: "Failed to fetch courses" });
+    return;
+  }
+
+  const result = courses.map((c: any) => {
+    let is_enrolled = false;
+    if (role === 'tutor' && c.created_by === userId) is_enrolled = true;
+    if (role === 'student' && c.enrollments?.some((e: any) => e.user_id === userId)) is_enrolled = true;
+    
+    const { enrollments, ...rest } = c;
+    return { ...rest, is_enrolled };
+  });
   
-  res.json(courses);
+  res.json(result);
 });
 
 /* ------------------------------------------------------------------ */
@@ -45,7 +48,7 @@ const createSchema = z.object({
   color: z.string().max(20).default("#ff9db0"),
 });
 
-router.post("/", requireAuth, requireTutor, (req, res) => {
+router.post("/", requireAuth, requireTutor, async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -54,9 +57,14 @@ router.post("/", requireAuth, requireTutor, (req, res) => {
   const { name, goal, color } = parsed.data;
   const id = "c" + Date.now();
 
-  db.prepare(
-    "INSERT INTO courses (id, name, goal, progress, students, color, created_by) VALUES (?, ?, ?, 0, 0, ?, ?)"
-  ).run(id, name, goal, color, req.user!.userId);
+  const { error } = await db
+    .from("courses")
+    .insert({ id, name, goal, progress: 0, students: 0, color, created_by: req.user!.userId });
+
+  if (error) {
+    res.status(500).json({ error: "Failed to create course" });
+    return;
+  }
 
   res.status(201).json({ id, name, goal, progress: 0, students: 0, color });
 });
@@ -65,7 +73,7 @@ router.post("/", requireAuth, requireTutor, (req, res) => {
 /*  POST /api/courses/:id/join  (student only)                         */
 /* ------------------------------------------------------------------ */
 
-router.post("/:id/join", requireAuth, (req, res) => {
+router.post("/:id/join", requireAuth, async (req, res) => {
   if (req.user!.role !== "student") {
     res.status(403).json({ error: "Only students can join courses" });
     return;
@@ -75,32 +83,35 @@ router.post("/:id/join", requireAuth, (req, res) => {
   const userId = req.user!.userId;
 
   // Check if course exists
-  const course = db.prepare("SELECT * FROM courses WHERE id = ?").get(courseId);
+  const { data: course } = await db.from("courses").select("id, students").eq("id", courseId).maybeSingle();
   if (!course) {
     res.status(404).json({ error: "Course not found" });
     return;
   }
 
-  try {
-    db.prepare("INSERT INTO enrollments (user_id, course_id) VALUES (?, ?)").run(userId, courseId);
-    db.prepare("UPDATE courses SET students = students + 1 WHERE id = ?").run(courseId);
-    res.json({ ok: true });
-  } catch (err: any) {
-    if (err.message.includes("UNIQUE constraint failed")) {
+  const { error } = await db.from("enrollments").insert({ user_id: userId, course_id: courseId });
+  if (error) {
+    if (error.code === '23505') { // unique violation
       res.status(400).json({ error: "Already enrolled" });
     } else {
       res.status(500).json({ error: "Failed to join course" });
     }
+    return;
   }
+  
+  // Increment students count
+  await db.from("courses").update({ students: course.students + 1 }).eq("id", courseId);
+
+  res.json({ ok: true });
 });
 
 /* ------------------------------------------------------------------ */
 /*  DELETE /api/courses/:id  (tutor only)                              */
 /* ------------------------------------------------------------------ */
 
-router.delete("/:id", requireAuth, requireTutor, (req, res) => {
-  const result = db.prepare("DELETE FROM courses WHERE id = ?").run(req.params.id);
-  if (result.changes === 0) {
+router.delete("/:id", requireAuth, requireTutor, async (req, res) => {
+  const { error, count } = await db.from("courses").delete({ count: 'exact' }).eq("id", req.params.id);
+  if (error || count === 0) {
     res.status(404).json({ error: "Course not found" });
     return;
   }

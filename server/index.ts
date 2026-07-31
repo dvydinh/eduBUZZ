@@ -4,10 +4,9 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { seedIfEmpty } from "./seed.js";
+// import { seedIfEmpty } from "./seed.js";
 
 // Routes
-import authRoutes from "./routes/auth.routes.js";
 import coursesRoutes from "./routes/courses.routes.js";
 import homeworkRoutes from "./routes/homework.routes.js";
 import quizzesRoutes from "./routes/quizzes.routes.js";
@@ -50,7 +49,6 @@ app.use(cookieParser());
 /*  Routes                                                             */
 /* ------------------------------------------------------------------ */
 
-app.use("/api/auth", authRoutes);
 app.use("/api/courses", coursesRoutes);
 app.use("/api", homeworkRoutes);   // /api/courses/:courseId/homework + /api/homework/:id/*
 app.use("/api", quizzesRoutes);    // /api/courses/:courseId/quizzes + /api/quizzes/:id/*
