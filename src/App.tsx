@@ -33,6 +33,7 @@ import {
   Minimize2,
   PenTool,
 } from 'lucide-react'
+import { useBee } from './useBee'
 import { getSocket, api } from './api'
 import { InteractiveWhiteboard } from './Whiteboard'
 
@@ -90,7 +91,8 @@ function mapRes(row: any): Res {
 /* --------------------------------- art ------------------------------------ */
 
 function Bee({ size = 44 }: { size?: number }) {
-  return <img src="/favicon.svg" alt="eduBUZZ bee" width={size} height={size} className="select-none object-contain" style={{ width: size, height: size }} draggable={false} />
+  const src = useBee()
+  return <img src={src} alt="eduBUZZ bee" width={size} height={size} className="select-none object-contain" style={{ width: size, height: size }} draggable={false} />
 }
 function Comb({ size = 20 }: { size?: number }) {
   return (
