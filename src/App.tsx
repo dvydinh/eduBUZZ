@@ -278,8 +278,8 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
   const li: React.CSSProperties = { border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }
   return (
     <div className="living-gradient relative flex min-h-screen items-center justify-center overflow-hidden p-6">
-      <div className="bee-fly-a pointer-events-none absolute left-0 top-0"><Bee size={64} /></div>
-      <div className="bee-fly-b pointer-events-none absolute left-0 top-0" style={{ animationDelay: '4s' }}><Bee size={48} /></div>
+      <div className="bee-fly-a pointer-events-none absolute -left-32 -top-32"><Bee size={64} /></div>
+      <div className="bee-fly-b pointer-events-none absolute -right-32 -top-32" style={{ animationDelay: '4s' }}><Bee size={48} /></div>
       <div className="pop relative z-10 w-full max-w-md rounded-[36px] p-9 text-center" style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(14px)', border: '4px solid #4a3b12', boxShadow: '0 18px 0 rgba(74,59,18,0.18)', animation: shake ? 'pop 0.1s 3 alternate' : undefined }}>
         <div className="mb-1 flex justify-center"><Bee size={64} /></div>
         <h1 className="text-5xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: '#4a3b12' }}>edu<span style={{ color: '#f4a71d' }}>BUZZ</span></h1>
