@@ -33,7 +33,6 @@ import {
   Minimize2,
   PenTool,
 } from 'lucide-react'
-import { useBee } from './useBee'
 import { getSocket, api } from './api'
 import { InteractiveWhiteboard } from './Whiteboard'
 
@@ -91,8 +90,7 @@ function mapRes(row: any): Res {
 /* --------------------------------- art ------------------------------------ */
 
 function Bee({ size = 44 }: { size?: number }) {
-  const src = useBee()
-  return <img src={src} alt="eduBUZZ bee" width={size} height={size} className="select-none object-contain" style={{ width: size, height: size }} draggable={false} />
+  return <img src="/favicon.svg" alt="eduBUZZ bee" width={size} height={size} className="select-none object-contain" style={{ width: size, height: size }} draggable={false} />
 }
 function Comb({ size = 20 }: { size?: number }) {
   return (
@@ -265,8 +263,13 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
   }
   const handleRoleSelect = (r: Role) => {
     setRole(r)
-    setEmail(r === 'student' ? 'student@edubuzz.app' : 'tutor@edubuzz.app')
-    setCode('demo1234')
+    if (mode === 'signin') {
+      setEmail(r === 'student' ? 'student@edubuzz.app' : 'tutor@edubuzz.app')
+      setCode('demo1234')
+    } else {
+      setEmail('')
+      setCode('')
+    }
   }
 
   const tab = (m: typeof mode, label: string) => (

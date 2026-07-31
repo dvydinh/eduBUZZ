@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <style>
+    .line { stroke: #4a3b12; stroke-width: 14; stroke-linejoin: round; stroke-linecap: round; }
+    .c-light { fill: #fef5d4; }
+    .c-org { fill: #fbb040; }
+    .c-yel { fill: #ffcf3f; }
+  </style>
+  
+  <g class="line">
+    <!-- C1 Top -->
+    <polygon points="226,74 286,74 316,126 286,178 226,178 196,126" class="c-light"/>
+    
+    <!-- C2 Top-Right -->
+    <polygon points="316,126 376,126 406,178 376,230 316,230 286,178" class="c-org"/>
+    
+    <!-- C3 Bottom-Right -->
+    <polygon points="316,230 376,230 406,282 376,334 316,334 286,282" class="c-light"/>
+    
+    <!-- C4 Bottom -->
+    <polygon points="226,282 286,282 316,334 286,386 226,386 196,334" class="c-org"/>
+    
+    <!-- C5 Bottom-Left -->
+    <polygon points="136,230 196,230 226,282 196,334 136,334 106,282" class="c-light"/>
+    
+    <!-- C6 Top-Left -->
+    <polygon points="136,126 196,126 226,178 196,230 136,230 106,178" class="c-org"/>
+    
+    <!-- C0 Center -->
+    <polygon points="226,178 286,178 316,230 286,282 226,282 196,230" class="c-yel"/>
+  </g>
+
+  <!-- Bottom Drip (Orange) -->
+  <path d="M 236,386 C 240,410 240,440 260,430 C 270,420 270,396 276,386 Z" fill="#fbb040" class="line" />
+  <!-- Overlay to hide stroke line -->
+  <path d="M 238,386 C 240,410 240,440 260,430 C 270,420 270,396 274,386 L 274,376 L 238,376 Z" fill="#fbb040" />
+
+  <!-- Bottom-Right Drip (Light) -->
+  <path d="M 326,334 C 330,350 330,380 346,370 C 356,360 356,344 366,334 Z" fill="#fef5d4" class="line" />
+  <path d="M 328,334 C 330,350 330,380 346,370 C 356,360 356,344 364,334 L 364,324 L 328,324 Z" fill="#fef5d4" />
+  
+  <!-- Tiny detached drop -->
+  <circle cx="282" cy="445" r="7" fill="#fbb040" class="line" />
+  <circle cx="282" cy="445" r="7" fill="#fbb040" />
+
+  <!-- Face on Center Hexagon -->
+  <circle cx="244" cy="226" r="6" fill="#4a3b12" />
+  <circle cx="270" cy="226" r="6" fill="#4a3b12" />
+  <path d="M 248,236 Q 257,246 266,236" fill="none" stroke="#4a3b12" stroke-width="6" stroke-linecap="round" />
+</svg>
