@@ -1404,10 +1404,15 @@ export default function App() {
 
   /* Check for existing session cookie on mount */
   useEffect(() => {
-    api.auth.me()
-      .then((u) => setSession({ name: u.name, role: u.role as Role }))
-      .catch(() => { /* not logged in */ })
-      .finally(() => setCheckingAuth(false))
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      if (currentSession?.user) {
+        setSession({ 
+          name: currentSession.user.user_metadata?.name || 'User', 
+          role: (currentSession.user.user_metadata?.role as Role) || 'student' 
+        })
+      }
+    }).catch(() => {})
+    .finally(() => setCheckingAuth(false))
   }, [])
 
   /* Fetch all data when session is established */
@@ -1471,7 +1476,7 @@ export default function App() {
               <span className="rounded-full px-3 py-0.5 text-sm" style={{ background: isTutor ? '#a37bff' : '#fffdf4', color: isTutor ? '#fff' : '#4a3b12', border: '2px solid #4a3b12' }}>{isTutor ? 'Tutor' : 'Student'}</span>
             </span>
             <button onClick={() => setDark((v) => !v)} className="squish rounded-full px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#fffdf4', color: '#4a3b12', border: '3px solid #4a3b12' }}>{dark ? 'Light' : 'Dark'}</button>
-            <button onClick={async () => { try { await api.auth.logout() } catch {} setSession(null) }} className="squish rounded-full px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#4a3b12', color: 'var(--honey)', border: '3px solid #4a3b12' }}>Exit</button>
+            <button onClick={async () => { try { await supabase.auth.signOut() } catch {} setSession(null) }} className="squish rounded-full px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#4a3b12', color: 'var(--honey)', border: '3px solid #4a3b12' }}>Exit</button>
           </div>
         </div>
         <HoneyEdge />
