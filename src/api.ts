@@ -83,6 +83,8 @@ export const api = {
       apiFetch<any>("/courses", { method: "POST", body: JSON.stringify(body) }),
     join: (id: string) =>
       apiFetch(`/courses/${id}/join`, { method: "POST" }),
+    invite: (id: string, email: string) =>
+      apiFetch(`/courses/${id}/invite`, { method: "POST", body: JSON.stringify({ email }) }),
     remove: (id: string) =>
       apiFetch(`/courses/${id}`, { method: "DELETE" }),
   },

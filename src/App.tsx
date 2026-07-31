@@ -247,6 +247,10 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
           options: { data: { name: name.trim(), role } }
         })
         if (error) throw error
+        if (!data.session) {
+          setErr('Vui lòng kiểm tra hộp thư email của bạn để xác nhận tài khoản!')
+          return
+        }
         onEnter(data.user?.user_metadata?.name || name.trim(), data.user?.user_metadata?.role as Role || role)
       } else {
         const { data, error } = await supabase.auth.signInAnonymously({
@@ -1169,18 +1173,67 @@ function CourseWorkspace({
   setResources: React.Dispatch<React.SetStateAction<Res[]>>
 }) {
   const [sub, setSub] = useState<Sub>('Meeting')
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteStatus, setInviteStatus] = useState<'idle'|'loading'|'success'|'error'>('idle')
+  const [inviteMsg, setInviteMsg] = useState('')
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!inviteEmail.trim()) return
+    setInviteStatus('loading')
+    setInviteMsg('')
+    try {
+      await api.courses.invite(course.id, inviteEmail.trim())
+      setInviteStatus('success')
+      setInviteMsg('Invitation sent! They have been added to the course.')
+      setInviteEmail('')
+    } catch (err: any) {
+      setInviteStatus('error')
+      setInviteMsg(err.error || 'Failed to invite')
+    }
+  }
+
   return (
     <div>
       <button onClick={back} className="squish mb-4 inline-flex items-center gap-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>
         <ArrowLeft size={20} strokeWidth={2.6} /> All courses
       </button>
-      <div className="mb-6 flex items-center gap-4">
-        <div className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: course.color, border: '3px solid #4a3b12' }}><Comb size={28} /></div>
-        <div>
-          <h2 className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{course.name}</h2>
-          <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>{course.goal} · {course.students} learners</p>
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: course.color, border: '3px solid #4a3b12' }}><Comb size={28} /></div>
+          <div>
+            <h2 className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{course.name}</h2>
+            <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>{course.goal} · {course.students} learners</p>
+          </div>
         </div>
+        <button onClick={() => setInviteOpen(true)} className="squish rounded-2xl px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#a37bff', color: '#fff', border: '3px solid #4a3b12' }}>+ Invite</button>
       </div>
+
+      {inviteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setInviteOpen(false)}>
+          <div className="w-full max-w-sm rounded-[36px] bg-white p-6" style={{ border: '4px solid #4a3b12', boxShadow: '0 12px 0 rgba(74,59,18,0.18)' }} onClick={e => e.stopPropagation()}>
+            <h3 className="mb-4 text-2xl font-bold text-center" style={{ fontFamily: 'var(--font-display)', color: '#4a3b12' }}>Invite Student</h3>
+            <form onSubmit={handleInvite}>
+              <input 
+                type="email" 
+                placeholder="Student's email" 
+                value={inviteEmail} 
+                onChange={e => setInviteEmail(e.target.value)} 
+                className="w-full rounded-2xl p-3 font-bold mb-4 outline-none" 
+                style={{ border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }} 
+              />
+              {inviteMsg && (
+                <p className={`mb-4 text-sm font-bold text-center ${inviteStatus === 'error' ? 'text-red-500' : 'text-green-600'}`}>{inviteMsg}</p>
+              )}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => {setInviteOpen(false); setInviteStatus('idle'); setInviteMsg('');}} className="squish flex-1 rounded-2xl py-3 font-extrabold text-sm" style={{ border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }}>Cancel</button>
+                <button type="submit" disabled={inviteStatus === 'loading'} className="squish flex-1 rounded-2xl py-3 font-extrabold text-sm" style={{ border: '3px solid #4a3b12', background: '#ffcf3f', color: '#4a3b12' }}>{inviteStatus === 'loading' ? '...' : 'Send'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       <div className="mb-6 flex flex-wrap gap-2">
         {subTabs.map((t) => (
           <button key={t} onClick={() => setSub(t)} className="squish rounded-full px-5 py-2.5 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: sub === t ? 'var(--honey)' : 'var(--card)', color: sub === t ? '#4a3b12' : 'var(--ink-soft)', border: '3px solid ' + (sub === t ? '#4a3b12' : 'var(--card-line)') }}>{t}</button>
