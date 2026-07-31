@@ -326,14 +326,14 @@ function HoneyEdge() {
 
 /* -------------------------------- Meeting --------------------------------- */
 
-function VideoPlayer({ stream, muted }: { stream?: MediaStream; muted?: boolean }) {
+function VideoPlayer({ stream, muted, className }: { stream?: MediaStream; muted?: boolean; className?: string }) {
   const ref = useRef<HTMLVideoElement>(null)
   useEffect(() => {
     if (ref.current && stream) {
       ref.current.srcObject = stream
     }
   }, [stream])
-  return <video ref={ref} autoPlay playsInline muted={muted} className="h-full w-full object-cover rounded-2xl" />
+  return <video ref={ref} autoPlay playsInline muted={muted} className={className || "h-full w-full object-cover rounded-2xl"} />
 }
 
 type Peer = { n: string; muted: boolean; camOff: boolean; screen: boolean; stream?: MediaStream }
@@ -408,7 +408,7 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     }
 
     socket.on('user-joined', async (id: string, user: any) => {
-      setPeers(prev => ({ ...prev, [id]: { n: user.name, muted: user.muted, camOff: user.camOff } }))
+      setPeers(prev => ({ ...prev, [id]: { n: user.name, muted: user.muted, camOff: user.camOff, screen: false } }))
       const pc = createPeer(id, user.name)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
@@ -418,7 +418,7 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     socket.on('signal', async (id: string, data: any) => {
       let pc = pcsRef.current[id]
       if (data.type === 'offer') {
-        setPeers(prev => ({ ...prev, [id]: prev[id] || { n: 'User', muted: false, camOff: false } }))
+        setPeers(prev => ({ ...prev, [id]: prev[id] || { n: 'User', muted: false, camOff: false, screen: false } }))
         pc = createPeer(id, 'User')
         await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
         const answer = await pc.createAnswer()
@@ -672,9 +672,9 @@ function Meeting({ isTutor, name, courseId }: { isTutor: boolean; name: string; 
     </Card>
   )
 
-  if (board || screenStream || Object.values(peers).some(p => p.screenStream)) {
+  if (board || share || Object.values(peers).some(p => p.screen)) {
     // Find active screen stream if any
-    const activeScreenStream = screenStream || Object.values(peers).find(p => p.screenStream)?.screenStream;
+    const activeScreenStream = share ? screenStreamRef.current : Object.values(peers).find(p => p.screen)?.stream;
     return (
       <div ref={wrap} className={`flex gap-4 ${full ? 'fixed inset-0 z-50 p-4' : 'h-[85vh]'}`} style={full ? { background: 'var(--bg)' } : undefined}>
         <div className="flex-1 flex flex-col gap-4 min-w-0">
