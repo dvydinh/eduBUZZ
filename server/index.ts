@@ -187,7 +187,6 @@ io.on("connection", (socket) => {
 });
 
 async function start() {
-  await seedIfEmpty();
 
   httpServer.listen(PORT, () => {
     console.log(`🐝 eduBUZZ API & WebRTC Signaling running on http://localhost:${PORT}`);
