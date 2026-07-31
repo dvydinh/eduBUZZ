@@ -1190,7 +1190,7 @@ function CourseWorkspace({
       setInviteEmail('')
     } catch (err: any) {
       setInviteStatus('error')
-      setInviteMsg(err.error || 'Failed to invite')
+      setInviteMsg(err.message || err.body?.error || 'Failed to invite')
     }
   }
 
