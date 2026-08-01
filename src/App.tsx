@@ -218,7 +218,7 @@ function IconToggle({ on, onIcon: On, offIcon: Off, label, onClick, danger }: { 
 /* --------------------------------- login ---------------------------------- */
 
 function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
-  const [mode, setMode] = useState<'guest' | 'signin' | 'signup'>('guest')
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [role, setRole] = useState<Role>('student')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -226,7 +226,7 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
   const [shake, setShake] = useState(false)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const ok = () => (mode === 'signin' ? email.trim() && code.trim().length >= 4 : mode === 'signup' ? name.trim() && email.trim() && code.trim().length >= 4 : name.trim() && code.trim().length >= 4)
+  const ok = () => (mode === 'signin' ? email.trim() && code.trim().length >= 4 : name.trim() && email.trim() && code.trim().length >= 4)
   const submit = async () => {
     if (!ok()) {
       setShake(true)
@@ -251,12 +251,6 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
           setErr('Vui lòng kiểm tra hộp thư email của bạn để xác nhận tài khoản!')
           return
         }
-        onEnter(data.user?.user_metadata?.name || name.trim(), data.user?.user_metadata?.role as Role || role)
-      } else {
-        const { data, error } = await supabase.auth.signInAnonymously({
-          options: { data: { name: name.trim(), role } }
-        })
-        if (error) throw error
         onEnter(data.user?.user_metadata?.name || name.trim(), data.user?.user_metadata?.role as Role || role)
       }
     } catch (e: any) {
@@ -292,17 +286,17 @@ function Login({ onEnter }: { onEnter: (name: string, role: Role) => void }) {
       <div className="pop relative z-10 w-full max-w-md rounded-[36px] p-9 text-center" style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(14px)', border: '4px solid #4a3b12', boxShadow: '0 18px 0 rgba(74,59,18,0.18)', animation: shake ? 'pop 0.1s 3 alternate' : undefined }}>
         <div className="mb-1 flex justify-center"><Bee size={64} /></div>
         <h1 className="text-5xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: '#4a3b12' }}>edu<span style={{ color: '#f4a71d' }}>BUZZ</span></h1>
-        <p className="mb-5 mt-1 text-lg font-bold" style={{ color: '#8a7742' }}>{mode === 'guest' ? 'buzz in with your passcode' : mode === 'signin' ? 'welcome back!' : 'join the hive'}</p>
+        <p className="mb-5 mt-1 text-lg font-bold" style={{ color: '#8a7742' }}>{mode === 'signin' ? 'welcome back!' : 'join the hive'}</p>
         <div className="mb-4 flex gap-3">{roleBtn('student', "I’m a Student")}{roleBtn('tutor', "I’m a Tutor")}</div>
-        <div className="mb-6 flex rounded-full p-1" style={{ background: '#fff6d6', border: '3px solid #4a3b12' }}>{tab('guest', 'Guest')}{tab('signin', 'Sign in')}{tab('signup', 'Sign up')}</div>
+        <div className="mb-6 flex rounded-full p-1" style={{ background: '#fff6d6', border: '3px solid #4a3b12' }}>{tab('signin', 'Sign in')}{tab('signup', 'Sign up')}</div>
         {err && <p className="mb-3 rounded-2xl px-4 py-2 text-sm font-extrabold" style={{ background: '#ffd6de', color: '#c25a6a' }}>{err}</p>}
         <div className="space-y-4 text-left">
           {mode !== 'signin' && <input className={inputCls} style={li} placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} />}
-          {mode !== 'guest' && <input className={inputCls} style={li} type="email" placeholder="you@hive.com" value={email} onChange={(e) => setEmail(e.target.value)} />}
-          <input className={inputCls} style={li} type="password" placeholder={mode === 'guest' ? 'Course passcode' : 'Password'} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          <input className={inputCls} style={li} type="email" placeholder="you@hive.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className={inputCls} style={li} type="password" placeholder={'Password'} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
         </div>
         <div className="mt-7 space-y-3">
-          <Btn onClick={submit}>{loading ? 'Loading…' : mode === 'signin' ? 'Sign in →' : mode === 'signup' ? 'Create account →' : 'Let me in →'}</Btn>
+          <Btn onClick={submit}>{loading ? 'Loading…' : mode === 'signin' ? 'Sign in →' : 'Create account →'}</Btn>
         </div>
       </div>
     </div>
