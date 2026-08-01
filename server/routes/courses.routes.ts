@@ -95,6 +95,7 @@ router.post("/", requireAuth, requireTutor, async (req, res) => {
     .insert({ id, name, goal, progress: 0, students: 0, color, created_by: req.user!.userId });
 
   if (error) {
+    console.error("Create course error:", error);
     res.status(500).json({ error: "Failed to create course" });
     return;
   }

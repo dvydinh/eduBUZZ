@@ -11,6 +11,7 @@ import coursesRoutes from "./routes/courses.routes.js";
 import homeworkRoutes from "./routes/homework.routes.js";
 import quizzesRoutes from "./routes/quizzes.routes.js";
 import resourcesRoutes from "./routes/resources.routes.js";
+import flashcardsRoutes from "./routes/flashcards.routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -53,6 +54,7 @@ app.use("/api/courses", coursesRoutes);
 app.use("/api", homeworkRoutes);   // /api/courses/:courseId/homework + /api/homework/:id/*
 app.use("/api", quizzesRoutes);    // /api/courses/:courseId/quizzes + /api/quizzes/:id/*
 app.use("/api", resourcesRoutes); // /api/courses/:courseId/resources + /api/resources/:id + /api/reminders
+app.use("/api", flashcardsRoutes); // /api/courses/:courseId/flashcards + /api/flashcards/* + /api/my-resources
 
 // Serve uploaded files statically
 const uploadsDir = path.join(__dirname, '..', 'uploads');

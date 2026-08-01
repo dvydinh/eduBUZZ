@@ -173,4 +173,47 @@ export const api = {
     create: (body: { day: number; label: string }) =>
       apiFetch<any>("/reminders", { method: "POST", body: JSON.stringify(body) }),
   },
+
+  /* ------------------------------------------------------------------ */
+  /*  Flashcards                                                         */
+  /* ------------------------------------------------------------------ */
+
+  flashcards: {
+    listDecks: (courseId: string) =>
+      apiFetch<any[]>(`/courses/${courseId}/flashcards`),
+    createDeck: (courseId: string, body: { name: string; description: string }) =>
+      apiFetch<any>(`/courses/${courseId}/flashcards`, { method: "POST", body: JSON.stringify(body) }),
+    deleteDeck: (deckId: number) =>
+      apiFetch(`/flashcards/${deckId}`, { method: "DELETE" }),
+    listCards: (deckId: number) =>
+      apiFetch<any[]>(`/flashcards/${deckId}/cards`),
+    addCard: (deckId: number, body: { front: string; back: string; image_url?: string }) =>
+      apiFetch<any>(`/flashcards/${deckId}/cards`, { method: "POST", body: JSON.stringify(body) }),
+    deleteCard: (cardId: number) =>
+      apiFetch(`/flashcards/cards/${cardId}`, { method: "DELETE" }),
+    reviewCard: (cardId: number, quality: number) =>
+      apiFetch<any>(`/flashcards/cards/${cardId}/review`, { method: "POST", body: JSON.stringify({ quality }) }),
+    uploadImage: async (deckId: number, file: File) => {
+      const headers = await getHeaders();
+      delete headers["Content-Type"];
+      const formData = new FormData();
+      formData.append("file", file);
+      return fetch(`${BASE}/flashcards/${deckId}/cards/upload-image`, {
+        method: "POST",
+        headers,
+        body: formData,
+      }).then((res) => {
+        if (!res.ok) throw new Error("Failed to upload image");
+        return res.json() as Promise<{ url: string }>;
+      });
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  /*  My Resources                                                       */
+  /* ------------------------------------------------------------------ */
+
+  myResources: {
+    list: () => apiFetch<{ resources: any[]; decks: any[] }>("/my-resources"),
+  },
 };

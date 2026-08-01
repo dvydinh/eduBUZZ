@@ -1144,9 +1144,375 @@ function Quizzes({ isTutor, courseId, list, setList }: { isTutor: boolean; cours
   )
 }
 
+/* ----------------------------- Flashcards --------------------------------- */
+
+type FCDeck = { id: number; course_id: string; name: string; description: string; created_by: string; card_count: number }
+type FCCard = { id: number; deck_id: number; front: string; back: string; image_url?: string; created_by: string; progress: { ease_factor: number; interval_days: number; repetitions: number; next_review: string; last_reviewed: string } | null }
+
+function speak(text: string) {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = 0.9
+    window.speechSynthesis.speak(u)
+  }
+}
+
+function FlashcardStudy({ deckId, deckName, onBack }: { deckId: number; deckName: string; onBack: () => void }) {
+  const [cards, setCards] = useState<FCCard[]>([])
+  const [idx, setIdx] = useState(0)
+  const [flipped, setFlipped] = useState(false)
+  const [results, setResults] = useState<Record<number, boolean>>({})
+  const [done, setDone] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [swipeDir, setSwipeDir] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.flashcards.listCards(deckId).then(c => { setCards(c); setLoading(false) }).catch(() => setLoading(false))
+  }, [deckId])
+
+  const current = cards[idx]
+  const known = Object.values(results).filter(Boolean).length
+  const unknown = Object.values(results).filter(v => !v).length
+
+  const handleReview = async (quality: number) => {
+    if (!current) return
+    const isKnown = quality >= 3
+    setResults(r => ({ ...r, [current.id]: isKnown }))
+    setSwipeDir(isKnown ? 'right' : 'left')
+    api.flashcards.reviewCard(current.id, quality).catch(() => {})
+
+    setTimeout(() => {
+      setSwipeDir(null)
+      setFlipped(false)
+      if (idx + 1 >= cards.length) {
+        setDone(true)
+      } else {
+        setIdx(i => i + 1)
+      }
+    }, 250)
+  }
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStart.current) return
+    const dx = e.changedTouches[0].clientX - touchStart.current.x
+    const dy = e.changedTouches[0].clientY - touchStart.current.y
+    const absDx = Math.abs(dx)
+    const absDy = Math.abs(dy)
+    if (Math.max(absDx, absDy) < 60) return // too small, treat as tap
+
+    if (absDx > absDy) {
+      // Horizontal swipe
+      handleReview(dx > 0 ? 4 : 1) // right = known, left = unknown
+    } else {
+      // Vertical swipe
+      handleReview(dy > 0 ? 4 : 1) // down = known, up = unknown
+    }
+    touchStart.current = null
+  }
+
+  if (loading) return <Card><p className="text-center font-bold" style={{ color: 'var(--ink-soft)' }}>Loading cards...</p></Card>
+  if (cards.length === 0) return <Card><p className="text-center font-bold" style={{ color: 'var(--ink-soft)' }}>No cards in this deck yet.</p><div className="mt-4 text-center"><Btn tone="ghost" onClick={onBack}>Back</Btn></div></Card>
+
+  if (done) {
+    return (
+      <Card>
+        <div className="text-center">
+          <div className="mb-4 text-6xl">🎉</div>
+          <h3 className="mb-2 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Session Complete!</h3>
+          <p className="mb-6 font-bold" style={{ color: 'var(--ink-soft)' }}>
+            You reviewed {cards.length} cards
+          </p>
+          <div className="mb-6 flex justify-center gap-8">
+            <div className="text-center">
+              <div className="text-3xl font-extrabold" style={{ color: '#22c55e' }}>{known}</div>
+              <div className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>Known</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-extrabold" style={{ color: '#ef4444' }}>{unknown}</div>
+              <div className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>Review again</div>
+            </div>
+          </div>
+          <div className="flex justify-center gap-3">
+            <Btn onClick={() => { setIdx(0); setFlipped(false); setResults({}); setDone(false) }}>Study Again</Btn>
+            <Btn tone="ghost" onClick={onBack}>Back to Decks</Btn>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <button onClick={onBack} className="squish inline-flex items-center gap-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>
+          <ArrowLeft size={20} strokeWidth={2.6} /> Back
+        </button>
+        <Pill>{idx + 1} / {cards.length}</Pill>
+      </div>
+
+      <h3 className="mb-4 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{deckName}</h3>
+
+      {/* Progress bar */}
+      <div className="mb-6 h-3 w-full overflow-hidden rounded-full" style={{ background: 'var(--bg-soft)' }}>
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${((idx) / cards.length) * 100}%`, background: 'linear-gradient(90deg, #22c55e, var(--honey))' }} />
+      </div>
+
+      {/* Card */}
+      <div
+        ref={cardRef}
+        onClick={() => setFlipped(f => !f)}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        className={`squish relative mx-auto cursor-pointer select-none overflow-hidden rounded-[32px] p-8 transition-all duration-300 ${swipeDir === 'right' ? 'translate-x-[120%] opacity-0' : swipeDir === 'left' ? '-translate-x-[120%] opacity-0' : ''}`}
+        style={{
+          background: 'var(--card)',
+          border: '4px solid ' + (flipped ? '#22c55e' : '#4a3b12'),
+          boxShadow: 'var(--shadow)',
+          minHeight: 280,
+          maxWidth: 500,
+          perspective: '1000px',
+        }}
+      >
+        <div className="flex flex-col items-center justify-center" style={{ minHeight: 200 }}>
+          {!flipped ? (
+            <>
+              {current.image_url && (
+                <img src={current.image_url} alt="" className="mb-4 max-h-40 rounded-2xl object-contain" style={{ border: '3px solid var(--card-line)' }} />
+              )}
+              <p className="text-center text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>{current.front}</p>
+              <button
+                onClick={(e) => { e.stopPropagation(); speak(current.front) }}
+                className="squish mt-3 grid h-10 w-10 place-items-center rounded-full"
+                style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}
+              >
+                <Volume2 size={18} strokeWidth={2.6} />
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-center text-2xl font-bold" style={{ color: '#22c55e', fontFamily: 'var(--font-display)' }}>{current.back}</p>
+              <button
+                onClick={(e) => { e.stopPropagation(); speak(current.back) }}
+                className="squish mt-3 grid h-10 w-10 place-items-center rounded-full"
+                style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}
+              >
+                <Volume2 size={18} strokeWidth={2.6} />
+              </button>
+            </>
+          )}
+        </div>
+        <p className="mt-4 text-center text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>
+          {flipped ? 'Tap to see front' : 'Tap to flip'}
+        </p>
+      </div>
+
+      {/* Desktop buttons */}
+      <div className="mt-6 flex justify-center gap-4">
+        <button
+          onClick={() => handleReview(1)}
+          className="squish flex items-center gap-2 rounded-full px-6 py-3 font-extrabold"
+          style={{ fontFamily: 'var(--font-display)', background: '#fee2e2', color: '#dc2626', border: '3px solid #dc2626' }}
+        >
+          <X size={18} strokeWidth={3} /> Don't know
+        </button>
+        <button
+          onClick={() => handleReview(4)}
+          className="squish flex items-center gap-2 rounded-full px-6 py-3 font-extrabold"
+          style={{ fontFamily: 'var(--font-display)', background: '#dcfce7', color: '#16a34a', border: '3px solid #16a34a' }}
+        >
+          ✓ Know it
+        </button>
+      </div>
+
+      <p className="mt-4 text-center text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>
+        On mobile: swipe right/down = know · swipe left/up = don't know
+      </p>
+    </div>
+  )
+}
+
+function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string }) {
+  const [decks, setDecks] = useState<FCDeck[]>([])
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ name: '', description: '' })
+  const [studyDeck, setStudyDeck] = useState<FCDeck | null>(null)
+  const [editDeck, setEditDeck] = useState<FCDeck | null>(null)
+  const [editCards, setEditCards] = useState<FCCard[]>([])
+  const [cardForm, setCardForm] = useState({ front: '', back: '', image_url: '' })
+  const [uploading, setUploading] = useState(false)
+
+  useEffect(() => {
+    api.flashcards.listDecks(courseId).then(setDecks).catch(() => {})
+  }, [courseId])
+
+  const createDeck = async () => {
+    if (!form.name.trim()) return
+    try {
+      const deck = await api.flashcards.createDeck(courseId, { name: form.name, description: form.description })
+      setDecks(d => [deck, ...d])
+      setForm({ name: '', description: '' })
+      setAdding(false)
+    } catch { /* ignore */ }
+  }
+
+  const deleteDeck = async (id: number) => {
+    try {
+      await api.flashcards.deleteDeck(id)
+      setDecks(d => d.filter(x => x.id !== id))
+    } catch { /* ignore */ }
+  }
+
+  const openEdit = async (deck: FCDeck) => {
+    setEditDeck(deck)
+    try {
+      const cards = await api.flashcards.listCards(deck.id)
+      setEditCards(cards)
+    } catch { setEditCards([]) }
+  }
+
+  const addCard = async () => {
+    if (!editDeck || !cardForm.front.trim() || !cardForm.back.trim()) return
+    try {
+      const card = await api.flashcards.addCard(editDeck.id, {
+        front: cardForm.front,
+        back: cardForm.back,
+        image_url: cardForm.image_url || undefined,
+      })
+      setEditCards(c => [...c, card])
+      setDecks(d => d.map(x => x.id === editDeck.id ? { ...x, card_count: x.card_count + 1 } : x))
+      setCardForm({ front: '', back: '', image_url: '' })
+    } catch { /* ignore */ }
+  }
+
+  const deleteCard = async (cardId: number) => {
+    if (!editDeck) return
+    try {
+      await api.flashcards.deleteCard(cardId)
+      setEditCards(c => c.filter(x => x.id !== cardId))
+      setDecks(d => d.map(x => x.id === editDeck.id ? { ...x, card_count: Math.max(0, x.card_count - 1) } : x))
+    } catch { /* ignore */ }
+  }
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !editDeck) return
+    setUploading(true)
+    try {
+      const { url } = await api.flashcards.uploadImage(editDeck.id, file)
+      setCardForm(f => ({ ...f, image_url: url }))
+    } catch { /* ignore */ }
+    setUploading(false)
+  }
+
+  // Study mode
+  if (studyDeck) {
+    return <FlashcardStudy deckId={studyDeck.id} deckName={studyDeck.name} onBack={() => setStudyDeck(null)} />
+  }
+
+  // Edit mode (manage cards in a deck)
+  if (editDeck) {
+    return (
+      <div>
+        <button onClick={() => setEditDeck(null)} className="squish mb-4 inline-flex items-center gap-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink-soft)' }}>
+          <ArrowLeft size={20} strokeWidth={2.6} /> Back to decks
+        </button>
+        <h3 className="mb-2 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{editDeck.name}</h3>
+        <p className="mb-6 font-bold" style={{ color: 'var(--ink-soft)' }}>{editDeck.description || 'No description'}</p>
+
+        {/* Add card form */}
+        <Card className="mb-6">
+          <h4 className="mb-4 text-xl font-extrabold" style={{ fontFamily: 'var(--font-display)' }}>Add new card</h4>
+          <div className="grid gap-3 md:grid-cols-2">
+            <input className={inputCls} style={inputStyle} placeholder="Front (term / question)" value={cardForm.front} onChange={e => setCardForm(f => ({ ...f, front: e.target.value }))} />
+            <input className={inputCls} style={inputStyle} placeholder="Back (definition / answer)" value={cardForm.back} onChange={e => setCardForm(f => ({ ...f, back: e.target.value }))} />
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <label className="squish flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 font-extrabold text-sm" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}>
+              <Upload size={16} /> {uploading ? 'Uploading...' : 'Add image'}
+              <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
+            </label>
+            {cardForm.image_url && <img src={cardForm.image_url} alt="" className="h-10 w-10 rounded-lg object-cover" style={{ border: '2px solid var(--card-line)' }} />}
+          </div>
+          <div className="mt-4">
+            <Btn onClick={addCard}><Plus size={18} /> Add card</Btn>
+          </div>
+        </Card>
+
+        {/* Card list */}
+        <div className="space-y-3">
+          {editCards.map((c, i) => (
+            <div key={c.id} className="flex items-center gap-4 rounded-2xl px-5 py-4" style={{ background: 'var(--card)', border: '3px solid var(--card-line)' }}>
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-extrabold text-sm" style={{ background: 'var(--honey)', border: '2px solid #4a3b12', color: '#4a3b12' }}>{i + 1}</span>
+              {c.image_url && <img src={c.image_url} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" style={{ border: '2px solid var(--card-line)' }} />}
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-extrabold">{c.front}</p>
+                <p className="truncate text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{c.back}</p>
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); speak(c.front) }} className="squish grid h-8 w-8 shrink-0 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}>
+                <Volume2 size={14} />
+              </button>
+              <button onClick={() => deleteCard(c.id)} className="squish grid h-8 w-8 shrink-0 place-items-center rounded-full" style={{ background: '#fee2e2', border: '2px solid #dc2626', color: '#dc2626' }}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          {editCards.length === 0 && <p className="py-8 text-center font-bold" style={{ color: 'var(--ink-soft)' }}>No cards yet. Add your first card above!</p>}
+        </div>
+      </div>
+    )
+  }
+
+  // Deck list
+  return (
+    <>
+      <div className="mb-4 flex justify-end"><Btn onClick={() => setAdding(true)}><Plus size={18} /> New deck</Btn></div>
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {decks.map(d => (
+          <Card key={d.id}>
+            <div className="mb-3 flex items-center justify-between">
+              <Pill>{d.card_count} cards</Pill>
+            </div>
+            <h3 className="mb-1 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{d.name}</h3>
+            <p className="mb-4 text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{d.description || 'No description'}</p>
+            <div className="flex flex-wrap gap-2">
+              <Btn tone={d.card_count > 0 ? 'grape' : 'ghost'} onClick={() => d.card_count > 0 ? setStudyDeck(d) : openEdit(d)}>
+                {d.card_count > 0 ? 'Study' : 'Add cards'}
+              </Btn>
+              <Btn tone="ghost" onClick={() => openEdit(d)}><PenTool size={16} /> Edit</Btn>
+              <Btn tone="ghost" onClick={() => deleteDeck(d.id)}><Trash2 size={16} /></Btn>
+            </div>
+          </Card>
+        ))}
+        {decks.length === 0 && (
+          <div className="col-span-full py-12 text-center">
+            <div className="mb-4 text-5xl">📚</div>
+            <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>No flashcard decks yet. Create one to start studying!</p>
+          </div>
+        )}
+      </div>
+      {adding && (
+        <Modal onClose={() => setAdding(false)}>
+          <h3 className="mb-5 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>New flashcard deck</h3>
+          <div className="space-y-4">
+            <input className={inputCls} style={inputStyle} placeholder="Deck name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            <input className={inputCls} style={inputStyle} placeholder="Description (optional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={createDeck}>Create</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
 /* ---------------------------- Course workspace ---------------------------- */
 
-const subTabs = ['Meeting', 'Homework', 'Quizzes', 'Resources'] as const
+const subTabs = ['Meeting', 'Homework', 'Quizzes', 'Flashcards', 'Resources'] as const
 type Sub = (typeof subTabs)[number]
 
 function CourseWorkspace({
@@ -1244,6 +1610,7 @@ function CourseWorkspace({
         {sub === 'Homework' && <Homework isTutor={isTutor} courseId={course.id} list={hw} setList={setHw} />}
         {sub === 'Quizzes' && <Quizzes isTutor={isTutor} courseId={course.id} list={quizzes} setList={setQuizzes} />}
         {sub === 'Resources' && <Resources isTutor={isTutor} courseId={course.id} list={resources} setList={setResources} />}
+        {sub === 'Flashcards' && <Flashcards isTutor={isTutor} courseId={course.id} />}
       </div>
     </div>
   )
@@ -1445,12 +1812,80 @@ function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: 
   )
 }
 
+/* ----------------------------- My Resources ------------------------------- */
+
+function MyResources() {
+  const [data, setData] = useState<{ resources: any[]; decks: any[] }>({ resources: [], decks: [] })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.myResources.list().then(d => { setData(d); setLoading(false) }).catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <Card><p className="text-center font-bold" style={{ color: 'var(--ink-soft)' }}>Loading...</p></Card>
+
+  return (
+    <div className="space-y-8">
+      {/* My uploaded resources */}
+      <div>
+        <h3 className="mb-4 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          <span className="mr-2">📁</span>My Uploaded Files
+        </h3>
+        {data.resources.length === 0 ? (
+          <Card><p className="font-bold" style={{ color: 'var(--ink-soft)' }}>You haven't uploaded any files yet.</p></Card>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {data.resources.map((r: any) => (
+              <Card key={r.id}>
+                <div className="flex items-center gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl" style={{ background: 'var(--honey)', border: '2px solid #4a3b12', color: '#4a3b12' }}>
+                    <FileText size={20} strokeWidth={2.6} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-extrabold">{r.name}</p>
+                    <p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{r.size}</p>
+                  </div>
+                  {r.file_url && (
+                    <a href={r.file_url} target="_blank" rel="noreferrer" className="squish grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}>
+                      <Download size={16} />
+                    </a>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* My flashcard decks */}
+      <div>
+        <h3 className="mb-4 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          <span className="mr-2">📚</span>My Flashcard Decks
+        </h3>
+        {data.decks.length === 0 ? (
+          <Card><p className="font-bold" style={{ color: 'var(--ink-soft)' }}>You haven't created any flashcard decks yet.</p></Card>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {data.decks.map((d: any) => (
+              <Card key={d.id}>
+                <Pill>{d.card_count} cards</Pill>
+                <h4 className="mt-3 text-xl font-extrabold" style={{ fontFamily: 'var(--font-display)' }}>{d.name}</h4>
+                <p className="text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{d.description || 'No description'}</p>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* --------------------------------- shell ---------------------------------- */
 
 export default function App() {
   const [session, setSession] = useState<{ name: string; role: Role } | null>(null)
   const [dark, setDark] = useState(false)
-  const [view, setView] = useState<'courses' | 'explore' | 'schedule'>('courses')
+  const [view, setView] = useState<'courses' | 'explore' | 'schedule' | 'myresources'>('courses')
   const [openCourse, setOpenCourse] = useState<Course | null>(null)
   const [checkingAuth, setCheckingAuth] = useState(true)
 
@@ -1507,7 +1942,7 @@ export default function App() {
   if (checkingAuth) return <div className="grid min-h-screen place-items-center" style={{ background: 'var(--bg)' }}><Bee size={80} /></div>
   if (!session) return <Login onEnter={(name, role) => setSession({ name, role })} />
 
-  const navBtn = (v: 'courses' | 'explore' | 'schedule', label: string, Icon: React.ComponentType<{ size?: number }>) => (
+  const navBtn = (v: 'courses' | 'explore' | 'schedule' | 'myresources', label: string, Icon: React.ComponentType<{ size?: number }>) => (
     <button
       onClick={() => {
         setView(v)
@@ -1545,6 +1980,7 @@ export default function App() {
           {navBtn('courses', 'My Courses', Comb)}
           {navBtn('explore', 'Explore', Search)}
           {navBtn('schedule', 'My Schedule', CalendarDays)}
+          {navBtn('myresources', 'My Resources', FileText)}
         </div>
       </nav>
 
@@ -1561,12 +1997,17 @@ export default function App() {
             <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Explore Courses</h2>
             <CoursesList courses={courses} setCourses={setCourses} isTutor={isTutor} onOpen={setOpenCourse} isExplore={true} />
           </>
-        ) : (
+        ) : view === 'schedule' ? (
           <>
             <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>My Schedule</h2>
             <Schedule courses={courses} hw={hw} quizzes={quizzes} reminders={reminders} setReminders={setReminders} />
           </>
-        )}
+        ) : view === 'myresources' ? (
+          <>
+            <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>My Resources</h2>
+            <MyResources />
+          </>
+        ) : null}
       </main>
 
       <footer className="mx-auto max-w-6xl px-6 pb-10 text-center font-bold" style={{ color: 'var(--ink-soft)' }}>eduBUZZ · sweet, secure, guest-friendly learning 🍯</footer>
