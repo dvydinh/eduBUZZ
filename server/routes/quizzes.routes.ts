@@ -236,6 +236,50 @@ router.post("/quizzes/:id/finish", requireAuth, async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  PATCH /api/quizzes/:id  (tutor only)                               */
+/* ------------------------------------------------------------------ */
+
+router.patch("/quizzes/:id", requireAuth, requireTutor, async (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { data, error } = await db
+    .from("quizzes")
+    .update({ 
+      title: parsed.data.title,
+      due_day: parsed.data.dueDay,
+      questions: parsed.data.questions
+    })
+    .eq("id", Number(req.params.id))
+    .select()
+    .single();
+
+  if (error || !data) {
+    res.status(500).json({ error: "Failed to update quiz" });
+    return;
+  }
+  
+  // Return the updated quiz in the correct format for the client
+  // The client doesn't need to know the correct answers, so we omit 'c'
+  const parsedQs = data.questions.map((q: any, i: number) => ({ id: i, q: q.q, a: q.a }));
+  
+  res.json({
+    id: data.id,
+    courseId: data.course_id,
+    title: data.title,
+    dueDay: data.due_day,
+    color: data.color,
+    imageUrl: data.image_url,
+    audioUrl: data.audio_url,
+    qs: parsedQs,
+    best: 0, // Since it's updated, best might not be known here, but the client only updates specific fields.
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  DELETE /api/quizzes/:id  (tutor only)                              */
 /* ------------------------------------------------------------------ */
 

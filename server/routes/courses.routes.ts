@@ -208,6 +208,40 @@ router.post("/:id/invite", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+/* ------------------------------------------------------------------ */
+/*  PATCH /api/courses/:id  (tutor only)                               */
+/* ------------------------------------------------------------------ */
+
+const updateCourseSchema = z.object({
+  name: z.string().min(1).max(100),
+  goal: z.string().min(1).max(300),
+  color: z.string().max(20).optional(),
+});
+
+router.patch("/:id", requireAuth, requireTutor, async (req, res) => {
+  const parsed = updateCourseSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { data, error } = await db
+    .from("courses")
+    .update({ 
+      name: parsed.data.name,
+      goal: parsed.data.goal,
+      ...(parsed.data.color ? { color: parsed.data.color } : {})
+    })
+    .eq("id", req.params.id)
+    .select()
+    .single();
+
+  if (error || !data) {
+    res.status(500).json({ error: "Failed to update course" });
+    return;
+  }
+  res.json(data);
+});
 
 /* ------------------------------------------------------------------ */
 /*  DELETE /api/courses/:id  (tutor only)                              */

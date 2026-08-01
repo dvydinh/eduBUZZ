@@ -81,6 +81,8 @@ export const api = {
     list: () => apiFetch<any[]>("/courses"),
     create: (body: { name: string; goal: string; color?: string }) =>
       apiFetch<any>("/courses", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: { name: string; goal: string; color?: string }) =>
+      apiFetch<any>(`/courses/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     join: (id: string) =>
       apiFetch(`/courses/${id}/join`, { method: "POST" }),
     invite: (id: string, email: string) =>
@@ -99,6 +101,11 @@ export const api = {
     create: (courseId: string, body: any) =>
       apiFetch<any>(`/courses/${courseId}/homework`, {
         method: "POST",
+        body: JSON.stringify(body),
+      }),
+    update: (id: number, body: any) =>
+      apiFetch<any>(`/homework/${id}`, {
+        method: "PATCH",
         body: JSON.stringify(body),
       }),
     submit: (id: number, fileName?: string) =>
@@ -122,6 +129,11 @@ export const api = {
     create: (courseId: string, body: any) =>
       apiFetch<any>(`/courses/${courseId}/quizzes`, {
         method: "POST",
+        body: JSON.stringify(body),
+      }),
+    update: (id: number, body: any) =>
+      apiFetch<any>(`/quizzes/${id}`, {
+        method: "PATCH",
         body: JSON.stringify(body),
       }),
     answer: (quizId: number, questionId: number, answerIndex: number) =>
@@ -172,6 +184,8 @@ export const api = {
     list: () => apiFetch<any[]>("/reminders"),
     create: (body: { day: number; label: string }) =>
       apiFetch<any>("/reminders", { method: "POST", body: JSON.stringify(body) }),
+    remove: (id: number) =>
+      apiFetch(`/reminders/${id}`, { method: "DELETE" }),
   },
 
   /* ------------------------------------------------------------------ */
@@ -183,12 +197,16 @@ export const api = {
       apiFetch<any[]>(`/courses/${courseId}/flashcards`),
     createDeck: (courseId: string, body: { name: string; description: string }) =>
       apiFetch<any>(`/courses/${courseId}/flashcards`, { method: "POST", body: JSON.stringify(body) }),
+    updateDeck: (deckId: number, body: { name: string; description: string }) =>
+      apiFetch<any>(`/flashcards/${deckId}`, { method: "PATCH", body: JSON.stringify(body) }),
     deleteDeck: (deckId: number) =>
       apiFetch(`/flashcards/${deckId}`, { method: "DELETE" }),
     listCards: (deckId: number) =>
       apiFetch<any[]>(`/flashcards/${deckId}/cards`),
     addCard: (deckId: number, body: { front: string; back: string; image_url?: string }) =>
       apiFetch<any>(`/flashcards/${deckId}/cards`, { method: "POST", body: JSON.stringify(body) }),
+    updateCard: (cardId: number, body: { front: string; back: string; image_url?: string }) =>
+      apiFetch<any>(`/flashcards/cards/${cardId}`, { method: "PATCH", body: JSON.stringify(body) }),
     deleteCard: (cardId: number) =>
       apiFetch(`/flashcards/cards/${cardId}`, { method: "DELETE" }),
     reviewCard: (cardId: number, quality: number) =>

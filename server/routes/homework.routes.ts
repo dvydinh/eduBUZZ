@@ -158,6 +158,41 @@ router.patch("/homework/:id/toggle-close", requireAuth, requireTutor, async (req
 });
 
 /* ------------------------------------------------------------------ */
+/*  PATCH /api/homework/:id  (tutor only)                              */
+/* ------------------------------------------------------------------ */
+
+const updateHomeworkSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000),
+  dueDay: z.number().int().min(1).max(31),
+});
+
+router.patch("/homework/:id", requireAuth, requireTutor, async (req, res) => {
+  const parsed = updateHomeworkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { data, error } = await db
+    .from("homework")
+    .update({ 
+      title: parsed.data.title,
+      description: parsed.data.description,
+      due_day: parsed.data.dueDay
+    })
+    .eq("id", Number(req.params.id))
+    .select()
+    .single();
+
+  if (error || !data) {
+    res.status(500).json({ error: "Failed to update homework" });
+    return;
+  }
+  res.json(data);
+});
+
+/* ------------------------------------------------------------------ */
 /*  DELETE /api/homework/:id  (tutor only)                             */
 /* ------------------------------------------------------------------ */
 

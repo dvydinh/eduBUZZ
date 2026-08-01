@@ -156,5 +156,21 @@ router.post("/reminders", requireAuth, async (req, res) => {
 
   res.status(201).json(result);
 });
+/* ------------------------------------------------------------------ */
+/*  DELETE /api/reminders/:id                                          */
+/* ------------------------------------------------------------------ */
+
+router.delete("/reminders/:id", requireAuth, async (req, res) => {
+  const { error, count } = await db
+    .from("reminders")
+    .delete({ count: 'exact' })
+    .match({ id: Number(req.params.id), user_id: req.user!.userId });
+    
+  if (error || count === 0) {
+    res.status(404).json({ error: "Reminder not found" });
+    return;
+  }
+  res.json({ ok: true });
+});
 
 export default router;

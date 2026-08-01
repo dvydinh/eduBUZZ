@@ -112,6 +112,45 @@ router.post("/courses/:courseId/flashcards", requireAuth, async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  PATCH /api/flashcards/:deckId - update deck                        */
+/* ------------------------------------------------------------------ */
+
+router.patch("/flashcards/:deckId", requireAuth, async (req, res) => {
+  const deckId = Number(req.params.deckId);
+  const parsed = deckSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { data: deck } = await db.from("flashcard_decks").select("created_by").eq("id", deckId).maybeSingle();
+  if (!deck) {
+    res.status(404).json({ error: "Deck not found" });
+    return;
+  }
+  if (deck.created_by !== req.user!.userId && req.user!.role !== "tutor") {
+    res.status(403).json({ error: "Only the creator or a tutor can edit this deck" });
+    return;
+  }
+
+  const { data, error } = await db
+    .from("flashcard_decks")
+    .update({ name: parsed.data.name, description: parsed.data.description })
+    .eq("id", deckId)
+    .select()
+    .single();
+
+  if (error || !data) {
+    res.status(500).json({ error: "Failed to update deck" });
+    return;
+  }
+
+  // Also fetch card_count
+  const { count } = await db.from("flashcard_cards").select("id", { count: "exact", head: true }).eq("deck_id", data.id);
+  res.json({ ...data, card_count: count || 0 });
+});
+
+/* ------------------------------------------------------------------ */
 /*  DELETE /api/flashcards/:deckId — delete deck (only creator)        */
 /* ------------------------------------------------------------------ */
 
@@ -252,6 +291,47 @@ router.post("/flashcards/:deckId/cards", requireAuth, async (req, res) => {
   }
 
   res.status(201).json(card);
+});
+
+/* ------------------------------------------------------------------ */
+/*  PATCH /api/flashcards/cards/:cardId - update card                  */
+/* ------------------------------------------------------------------ */
+
+router.patch("/flashcards/cards/:cardId", requireAuth, async (req, res) => {
+  const cardId = Number(req.params.cardId);
+  const parsed = cardSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { data: card } = await db.from("flashcard_cards").select("created_by, deck_id").eq("id", cardId).maybeSingle();
+  if (!card) {
+    res.status(404).json({ error: "Card not found" });
+    return;
+  }
+  if (card.created_by !== req.user!.userId && req.user!.role !== "tutor") {
+    res.status(403).json({ error: "Only the creator or a tutor can edit this card" });
+    return;
+  }
+
+  const { data, error } = await db
+    .from("flashcard_cards")
+    .update({ 
+      front: parsed.data.front,
+      back: parsed.data.back,
+      image_url: parsed.data.image_url
+    })
+    .eq("id", cardId)
+    .select()
+    .single();
+
+  if (error || !data) {
+    res.status(500).json({ error: "Failed to update card" });
+    return;
+  }
+
+  res.json(data);
 });
 
 /* ------------------------------------------------------------------ */

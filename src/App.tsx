@@ -835,7 +835,7 @@ function SubmitBox({ onSubmit }: { onSubmit: () => void }) {
 }
 
 // Shared detail body (task + optional PDF + role actions).
-function HwActions({ cur, isTutor, onSubmit, onToggleClose, onDelete }: { cur: HW; isTutor: boolean; onSubmit: () => void; onToggleClose: () => void; onDelete: () => void }) {
+function HwActions({ cur, isTutor, onSubmit, onToggleClose, onDelete, onEdit }: { cur: HW; isTutor: boolean; onSubmit: () => void; onToggleClose: () => void; onDelete: () => void; onEdit?: () => void }) {
   if (isTutor)
     return (
       <div className="space-y-3">
@@ -843,8 +843,9 @@ function HwActions({ cur, isTutor, onSubmit, onToggleClose, onDelete }: { cur: H
           <p className="text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--honey-deep)' }}>{cur.submissions}</p>
           <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>submissions received</p>
         </div>
-        <div className="flex gap-3">
-          <Btn onClick={onToggleClose}>{cur.status === 'closed' ? 'Reopen' : 'Close now'}</Btn>
+        <div className="flex gap-2">
+          <Btn onClick={onToggleClose}>{cur.status === 'closed' ? 'Reopen' : 'Close'}</Btn>
+          {onEdit && <Btn tone="ghost" onClick={onEdit}><PenTool size={18} /> Edit</Btn>}
           <Btn tone="ghost" onClick={onDelete}><Trash2 size={18} /> Delete</Btn>
         </div>
       </div>
@@ -855,7 +856,7 @@ function HwActions({ cur, isTutor, onSubmit, onToggleClose, onDelete }: { cur: H
 }
 
 // Full-screen PDF homework page.
-function HomeworkFull({ cur, isTutor, back, onSubmit, onToggleClose, onDelete }: { cur: HW; isTutor: boolean; back: () => void; onSubmit: () => void; onToggleClose: () => void; onDelete: () => void }) {
+function HomeworkFull({ cur, isTutor, back, onSubmit, onToggleClose, onDelete, onEdit }: { cur: HW; isTutor: boolean; back: () => void; onSubmit: () => void; onToggleClose: () => void; onDelete: () => void; onEdit?: () => void }) {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: 'var(--bg)' }}>
       <div className="mx-auto max-w-5xl px-6 py-6">
@@ -879,7 +880,7 @@ function HomeworkFull({ cur, isTutor, back, onSubmit, onToggleClose, onDelete }:
               <Media imageUrl={cur.imageUrl} audioUrl={cur.audioUrl} />
             </Card>
             <Card>
-              <HwActions cur={cur} isTutor={isTutor} onSubmit={onSubmit} onToggleClose={onToggleClose} onDelete={onDelete} />
+              <HwActions cur={cur} isTutor={isTutor} onSubmit={onSubmit} onToggleClose={onToggleClose} onDelete={onDelete} onEdit={onEdit} />
             </Card>
           </div>
         </div>
@@ -893,6 +894,9 @@ function Homework({ isTutor, courseId, list, setList }: { isTutor: boolean; cour
   const [openId, setOpenId] = useState<number | null>(null)
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ title: '', dueDay: '9', points: '10', desc: '', pdfUrl: '', imageUrl: '', audioUrl: '' })
+  
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ title: '', dueDay: '9', desc: '' })
   const cur = openId != null ? list.find((h) => h.id === openId) ?? null : null
 
   const submit = async (id: number) => {
@@ -937,8 +941,26 @@ function Homework({ isTutor, courseId, list, setList }: { isTutor: boolean; cour
   }
   const badge = hwBadge
 
+  const openEdit = (h: HW) => {
+    setEditId(h.id)
+    setEditForm({ title: h.title, dueDay: h.dueDay.toString(), desc: h.desc })
+    setOpenId(null)
+  }
+  const saveEdit = async () => {
+    if (!editId || !editForm.title.trim()) return
+    try {
+      const res = await api.homework.update(editId, {
+        title: editForm.title,
+        dueDay: Number(editForm.dueDay) || 1,
+        description: editForm.desc
+      })
+      setList(l => l.map(h => h.id === editId ? { ...h, title: res.title, dueDay: res.due_day, desc: res.description } : h))
+      setEditId(null)
+    } catch { /* ignore */ }
+  }
+
   if (cur && cur.kind === 'pdf')
-    return <HomeworkFull cur={cur} isTutor={isTutor} back={() => setOpenId(null)} onSubmit={() => submit(cur.id)} onToggleClose={() => toggleClose(cur.id)} onDelete={() => del(cur.id)} />
+    return <HomeworkFull cur={cur} isTutor={isTutor} back={() => setOpenId(null)} onSubmit={() => submit(cur.id)} onToggleClose={() => toggleClose(cur.id)} onDelete={() => del(cur.id)} onEdit={() => openEdit(cur)} />
 
   return (
     <div className="space-y-4">
@@ -969,7 +991,7 @@ function Homework({ isTutor, courseId, list, setList }: { isTutor: boolean; cour
           <p className="mb-4 font-bold" style={{ color: 'var(--ink-soft)' }}>Due {dueLabel(cur.dueDay)} · {cur.points} points</p>
           <div className="mb-4 rounded-2xl p-4 font-bold" style={{ background: 'var(--bg-soft)', color: 'var(--ink)' }}>{cur.desc}</div>
           <Media imageUrl={cur.imageUrl} audioUrl={cur.audioUrl} />
-          <HwActions cur={cur} isTutor={isTutor} onSubmit={() => submit(cur.id)} onToggleClose={() => toggleClose(cur.id)} onDelete={() => del(cur.id)} />
+          <HwActions cur={cur} isTutor={isTutor} onSubmit={() => submit(cur.id)} onToggleClose={() => toggleClose(cur.id)} onDelete={() => del(cur.id)} onEdit={() => openEdit(cur)} />
         </Modal>
       )}
 
@@ -988,6 +1010,18 @@ function Homework({ isTutor, courseId, list, setList }: { isTutor: boolean; cour
             <MediaInputs img={form.imageUrl} audio={form.audioUrl} setImg={(v) => setForm({ ...form, imageUrl: v })} setAudio={(v) => setForm({ ...form, audioUrl: v })} />
           </div>
           <div className="mt-6 flex gap-3"><Btn onClick={add}>Post</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+
+      {editId && (
+        <Modal onClose={() => setEditId(null)}>
+          <h3 className="mb-1 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Edit homework</h3>
+          <div className="space-y-4 mt-4">
+            <input className={inputCls} style={inputStyle} placeholder="Title" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
+            <input className={inputCls} style={inputStyle} type="number" placeholder="Due day (Aug)" value={editForm.dueDay} onChange={(e) => setEditForm({ ...editForm, dueDay: e.target.value })} />
+            <textarea className={inputCls} style={{ ...inputStyle, minHeight: 90 }} placeholder="Instructions…" value={editForm.desc} onChange={(e) => setEditForm({ ...editForm, desc: e.target.value })} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={saveEdit}>Save</Btn><Btn tone="ghost" onClick={() => setEditId(null)}>Cancel</Btn></div>
         </Modal>
       )}
     </div>
@@ -1071,6 +1105,8 @@ function Quizzes({ isTutor, courseId, list, setList }: { isTutor: boolean; cours
   const [active, setActive] = useState<QQ | null>(null)
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ n: '', dueDay: '15', audioUrl: '', imageUrl: '', q: '', a1: '', a2: '', a3: '' })
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ n: '', dueDay: '15', q: '', a1: '', a2: '', a3: '' })
   const add = async () => {
     if (!form.n.trim() || !form.q.trim()) return
     try {
@@ -1094,6 +1130,32 @@ function Quizzes({ isTutor, courseId, list, setList }: { isTutor: boolean; cours
     } catch { /* ignore */ }
   }
   const saveScore = (id: number, pct: number) => setList((l) => l.map((q) => (q.id === id ? { ...q, best: Math.max(pct, q.best ?? 0) } : q)))
+
+  const openEdit = (q: QQ) => {
+    setEditId(q.id)
+    const firstQ = q.qs[0]
+    setEditForm({
+      n: q.title,
+      dueDay: q.dueDay.toString(),
+      q: firstQ ? firstQ.q : '',
+      a1: firstQ && firstQ.a[0] ? firstQ.a[0] : '',
+      a2: firstQ && firstQ.a[1] ? firstQ.a[1] : '',
+      a3: firstQ && firstQ.a[2] ? firstQ.a[2] : ''
+    })
+  }
+
+  const saveEdit = async () => {
+    if (!editId || !editForm.n.trim() || !editForm.q.trim()) return
+    try {
+      const res = await api.quizzes.update(editId, {
+        title: editForm.n,
+        dueDay: Number(editForm.dueDay) || 1,
+        questions: [{ q: editForm.q, a: [editForm.a1 || 'A', editForm.a2 || 'B', editForm.a3 || 'C'], c: 0 }],
+      })
+      setList(l => l.map(q => q.id === editId ? { ...q, title: res.title, dueDay: res.dueDay, qs: res.qs } : q))
+      setEditId(null)
+    } catch { /* ignore */ }
+  }
   return (
     <>
       {isTutor && <div className="mb-4 flex justify-end"><Btn onClick={() => setAdding(true)}><Plus size={18} /> Add quiz</Btn></div>}
@@ -1113,7 +1175,12 @@ function Quizzes({ isTutor, courseId, list, setList }: { isTutor: boolean; cours
             <p className="mb-4 text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>Due {dueLabel(q.dueDay)}</p>
             <div className="flex gap-2">
               <Btn tone={q.best == null ? 'grape' : 'honey'} onClick={() => setActive(q)}>{isTutor ? 'Preview' : q.best == null ? 'Start quiz' : 'Retry'}</Btn>
-              {isTutor && <Btn tone="ghost" onClick={() => removeQuiz(q.id)}><Trash2 size={18} /></Btn>}
+              {isTutor && (
+                <>
+                  <Btn tone="ghost" onClick={() => openEdit(q)}><PenTool size={18} /></Btn>
+                  <Btn tone="ghost" onClick={() => removeQuiz(q.id)}><Trash2 size={18} /></Btn>
+                </>
+              )}
             </div>
           </Card>
         ))}
@@ -1136,6 +1203,23 @@ function Quizzes({ isTutor, courseId, list, setList }: { isTutor: boolean; cours
             <input className={inputCls} style={inputStyle} placeholder="Wrong answer" value={form.a3} onChange={(e) => setForm({ ...form, a3: e.target.value })} />
           </div>
           <div className="mt-6 flex gap-3"><Btn onClick={add}>Create</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+      {editId && (
+        <Modal onClose={() => setEditId(null)}>
+          <h3 className="mb-5 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Edit quiz</h3>
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <input className={inputCls} style={inputStyle} placeholder="Quiz title" value={editForm.n} onChange={(e) => setEditForm({ ...editForm, n: e.target.value })} />
+              <input className={inputCls} style={inputStyle} type="number" placeholder="Due day" value={editForm.dueDay} onChange={(e) => setEditForm({ ...editForm, dueDay: e.target.value })} />
+            </div>
+            <input className={inputCls} style={inputStyle} placeholder="First question" value={editForm.q} onChange={(e) => setEditForm({ ...editForm, q: e.target.value })} />
+            <p className="text-sm font-extrabold" style={{ color: 'var(--ink-soft)' }}>Answers (first is correct)</p>
+            <input className={inputCls} style={inputStyle} placeholder="Correct answer" value={editForm.a1} onChange={(e) => setEditForm({ ...editForm, a1: e.target.value })} />
+            <input className={inputCls} style={inputStyle} placeholder="Wrong answer" value={editForm.a2} onChange={(e) => setEditForm({ ...editForm, a2: e.target.value })} />
+            <input className={inputCls} style={inputStyle} placeholder="Wrong answer" value={editForm.a3} onChange={(e) => setEditForm({ ...editForm, a3: e.target.value })} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={saveEdit}>Save</Btn><Btn tone="ghost" onClick={() => setEditId(null)}>Cancel</Btn></div>
         </Modal>
       )}
     </>
@@ -1344,6 +1428,10 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
   const [editCards, setEditCards] = useState<FCCard[]>([])
   const [cardForm, setCardForm] = useState({ front: '', back: '', image_url: '' })
   const [uploading, setUploading] = useState(false)
+  const [editDeckMetaId, setEditDeckMetaId] = useState<number | null>(null)
+  const [editDeckMetaForm, setEditDeckMetaForm] = useState({ name: '', description: '' })
+  const [editCardId, setEditCardId] = useState<number | null>(null)
+  const [editCardForm, setEditCardForm] = useState({ front: '', back: '', image_url: '' })
 
   useEffect(() => {
     api.flashcards.listDecks(courseId).then(setDecks).catch(() => {})
@@ -1363,6 +1451,15 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
     try {
       await api.flashcards.deleteDeck(id)
       setDecks(d => d.filter(x => x.id !== id))
+    } catch { /* ignore */ }
+  }
+
+  const saveDeckMeta = async () => {
+    if (!editDeckMetaId || !editDeckMetaForm.name.trim()) return
+    try {
+      const res = await api.flashcards.updateDeck(editDeckMetaId, { name: editDeckMetaForm.name, description: editDeckMetaForm.description })
+      setDecks(d => d.map(x => x.id === editDeckMetaId ? { ...x, name: res.name, description: res.description } : x))
+      setEditDeckMetaId(null)
     } catch { /* ignore */ }
   }
 
@@ -1394,6 +1491,19 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
       await api.flashcards.deleteCard(cardId)
       setEditCards(c => c.filter(x => x.id !== cardId))
       setDecks(d => d.map(x => x.id === editDeck.id ? { ...x, card_count: Math.max(0, x.card_count - 1) } : x))
+    } catch { /* ignore */ }
+  }
+
+  const saveCard = async () => {
+    if (!editCardId || !editCardForm.front.trim() || !editCardForm.back.trim()) return
+    try {
+      const card = await api.flashcards.updateCard(editCardId, {
+        front: editCardForm.front,
+        back: editCardForm.back,
+        image_url: editCardForm.image_url || undefined,
+      })
+      setEditCards(c => c.map(x => x.id === editCardId ? card : x))
+      setEditCardId(null)
     } catch { /* ignore */ }
   }
 
@@ -1455,6 +1565,9 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
               <button onClick={(e) => { e.stopPropagation(); speak(c.front) }} className="squish grid h-8 w-8 shrink-0 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}>
                 <Volume2 size={14} />
               </button>
+              <button onClick={() => { setEditCardId(c.id); setEditCardForm({ front: c.front, back: c.back, image_url: c.image_url || '' }) }} className="squish grid h-8 w-8 shrink-0 place-items-center rounded-full" style={{ background: 'var(--bg-soft)', border: '2px solid var(--card-line)', color: 'var(--ink-soft)' }}>
+                <PenTool size={14} />
+              </button>
               <button onClick={() => deleteCard(c.id)} className="squish grid h-8 w-8 shrink-0 place-items-center rounded-full" style={{ background: '#fee2e2', border: '2px solid #dc2626', color: '#dc2626' }}>
                 <Trash2 size={14} />
               </button>
@@ -1482,7 +1595,8 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
               <Btn tone={d.card_count > 0 ? 'grape' : 'ghost'} onClick={() => d.card_count > 0 ? setStudyDeck(d) : openEdit(d)}>
                 {d.card_count > 0 ? 'Study' : 'Add cards'}
               </Btn>
-              <Btn tone="ghost" onClick={() => openEdit(d)}><PenTool size={16} /> Edit</Btn>
+              <Btn tone="ghost" onClick={() => openEdit(d)}><BookOpen size={16} /> Manage cards</Btn>
+              <Btn tone="ghost" onClick={() => { setEditDeckMetaId(d.id); setEditDeckMetaForm({ name: d.name, description: d.description || '' }) }}><PenTool size={16} /></Btn>
               <Btn tone="ghost" onClick={() => deleteDeck(d.id)}><Trash2 size={16} /></Btn>
             </div>
           </Card>
@@ -1502,6 +1616,27 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
             <input className={inputCls} style={inputStyle} placeholder="Description (optional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           </div>
           <div className="mt-6 flex gap-3"><Btn onClick={createDeck}>Create</Btn><Btn tone="ghost" onClick={() => setAdding(false)}>Cancel</Btn></div>
+        </Modal>
+      )}
+      {editDeckMetaId && (
+        <Modal onClose={() => setEditDeckMetaId(null)}>
+          <h3 className="mb-5 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Edit deck</h3>
+          <div className="space-y-4">
+            <input className={inputCls} style={inputStyle} placeholder="Deck name" value={editDeckMetaForm.name} onChange={e => setEditDeckMetaForm(f => ({ ...f, name: e.target.value }))} />
+            <input className={inputCls} style={inputStyle} placeholder="Description (optional)" value={editDeckMetaForm.description} onChange={e => setEditDeckMetaForm(f => ({ ...f, description: e.target.value }))} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={saveDeckMeta}>Save</Btn><Btn tone="ghost" onClick={() => setEditDeckMetaId(null)}>Cancel</Btn></div>
+        </Modal>
+      )}
+      {editCardId && (
+        <Modal onClose={() => setEditCardId(null)}>
+          <h4 className="mb-4 text-xl font-extrabold" style={{ fontFamily: 'var(--font-display)' }}>Edit card</h4>
+          <div className="space-y-4">
+            <input className={inputCls} style={inputStyle} placeholder="Front" value={editCardForm.front} onChange={e => setEditCardForm(f => ({ ...f, front: e.target.value }))} />
+            <input className={inputCls} style={inputStyle} placeholder="Back" value={editCardForm.back} onChange={e => setEditCardForm(f => ({ ...f, back: e.target.value }))} />
+            <input className={inputCls} style={inputStyle} placeholder="Image URL (optional)" value={editCardForm.image_url} onChange={e => setEditCardForm(f => ({ ...f, image_url: e.target.value }))} />
+          </div>
+          <div className="mt-6 flex gap-3"><Btn onClick={saveCard}>Save</Btn><Btn tone="ghost" onClick={() => setEditCardId(null)}>Cancel</Btn></div>
         </Modal>
       )}
     </>
@@ -1524,6 +1659,7 @@ function CourseWorkspace({
   setQuizzes,
   resources,
   setResources,
+  onCourseUpdated,
 }: {
   course: Course
   isTutor: boolean
@@ -1535,12 +1671,31 @@ function CourseWorkspace({
   setQuizzes: React.Dispatch<React.SetStateAction<QQ[]>>
   resources: Res[]
   setResources: React.Dispatch<React.SetStateAction<Res[]>>
+  onCourseUpdated: (course: Course) => void
 }) {
   const [sub, setSub] = useState<Sub>('Meeting')
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteStatus, setInviteStatus] = useState<'idle'|'loading'|'success'|'error'>('idle')
   const [inviteMsg, setInviteMsg] = useState('')
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState({ name: course.name, goal: course.goal, color: course.color })
+  const [editLoading, setEditLoading] = useState(false)
+
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editForm.name.trim() || !editForm.goal.trim()) return
+    setEditLoading(true)
+    try {
+      const updated = await api.courses.update(course.id, editForm)
+      onCourseUpdated({ ...course, ...updated })
+      setEditOpen(false)
+    } catch {
+      // ignore
+    } finally {
+      setEditLoading(false)
+    }
+  }
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1567,12 +1722,47 @@ function CourseWorkspace({
         <div className="flex items-center gap-4">
           <div className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: course.color, border: '3px solid #4a3b12' }}><Comb size={28} /></div>
           <div>
-            <h2 className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{course.name}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{course.name}</h2>
+              {isTutor && (
+                <button onClick={() => setEditOpen(true)} className="squish text-gray-500 hover:text-black">
+                  <PenTool size={20} />
+                </button>
+              )}
+            </div>
             <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>{course.goal} · {course.students} learners</p>
           </div>
         </div>
         <button onClick={() => setInviteOpen(true)} className="squish rounded-2xl px-5 py-2 font-extrabold" style={{ fontFamily: 'var(--font-display)', background: '#a37bff', color: '#fff', border: '3px solid #4a3b12' }}>+ Invite</button>
       </div>
+
+      {editOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setEditOpen(false)}>
+          <div className="w-full max-w-sm rounded-[36px] bg-white p-6" style={{ border: '4px solid #4a3b12', boxShadow: '0 12px 0 rgba(74,59,18,0.18)' }} onClick={e => e.stopPropagation()}>
+            <h3 className="mb-4 text-2xl font-bold text-center" style={{ fontFamily: 'var(--font-display)', color: '#4a3b12' }}>Edit Course</h3>
+            <form onSubmit={handleEdit} className="space-y-4 text-left">
+              <input 
+                placeholder="Course Name" 
+                value={editForm.name} 
+                onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} 
+                className="w-full rounded-2xl p-3 font-bold outline-none" 
+                style={{ border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }} 
+              />
+              <input 
+                placeholder="Course Goal" 
+                value={editForm.goal} 
+                onChange={e => setEditForm(f => ({ ...f, goal: e.target.value }))} 
+                className="w-full rounded-2xl p-3 font-bold outline-none" 
+                style={{ border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }} 
+              />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setEditOpen(false)} className="squish flex-1 rounded-2xl py-3 font-extrabold text-sm" style={{ border: '3px solid #4a3b12', background: '#fffdf4', color: '#4a3b12' }}>Cancel</button>
+                <button type="submit" disabled={editLoading} className="squish flex-1 rounded-2xl py-3 font-extrabold text-sm" style={{ border: '3px solid #4a3b12', background: '#ffcf3f', color: '#4a3b12' }}>{editLoading ? 'Saving...' : 'Save'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {inviteOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setInviteOpen(false)}>
@@ -1727,14 +1917,14 @@ function CoursesList({ courses, setCourses, isTutor, onOpen, isExplore }: { cour
 
 /* --------------------------- Personal Schedule ---------------------------- */
 
-type Deadline = { day: number; label: string; sub: string; tone: string }
+type Deadline = { id?: number; day: number; label: string; sub: string; tone: string; isReminder?: boolean }
 
 function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: Course[]; hw: HW[]; quizzes: QQ[]; reminders: Reminder[]; setReminders: React.Dispatch<React.SetStateAction<Reminder[]>> }) {
   const courseName = (id: string) => courses.find((c) => c.id === id)?.name ?? 'Course'
   const deadlines: Deadline[] = [
     ...hw.map((h) => ({ day: h.dueDay, label: h.title, sub: courseName(h.courseId) + ' · homework', tone: '#ffcf3f' })),
     ...quizzes.map((q) => ({ day: q.dueDay, label: q.title, sub: courseName(q.courseId) + ' · quiz', tone: '#a37bff' })),
-    ...reminders.map((r) => ({ day: r.day, label: r.label, sub: 'Personal reminder', tone: '#ff9db0' })),
+    ...reminders.map((r) => ({ id: r.id, day: r.day, label: r.label, sub: 'Personal reminder', tone: '#ff9db0', isReminder: true })),
   ].sort((a, b) => a.day - b.day)
 
   const byDay = new Map<number, Deadline[]>()
@@ -1752,6 +1942,13 @@ function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: 
         setReminders((r) => [...r, res])
       } catch { /* ignore */ }
     }
+  }
+
+  const deleteReminder = async (id: number) => {
+    try {
+      await api.reminders.remove(id)
+      setReminders(r => r.filter(x => x.id !== id))
+    } catch { /* ignore */ }
   }
 
   return (
@@ -1798,10 +1995,15 @@ function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: 
                   <div className="text-base font-extrabold" style={{ color: '#4a3b12', fontFamily: 'var(--font-display)' }}>{d.day}</div>
                 </div>
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="truncate font-extrabold">{d.label}</p>
                 <p className="truncate text-sm font-bold" style={{ color: 'var(--ink-soft)' }}>{d.sub}</p>
               </div>
+              {d.isReminder && d.id && (
+                <button onClick={() => deleteReminder(d.id!)} className="squish grid h-8 w-8 shrink-0 place-items-center rounded-full" style={{ background: '#fee2e2', border: '2px solid #dc2626', color: '#dc2626' }}>
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -1984,7 +2186,7 @@ export default function App() {
 
       <main className="mx-auto max-w-6xl px-6 py-8">
         {openCourse ? (
-          <CourseWorkspace course={openCourse} isTutor={isTutor} name={session.name} back={() => setOpenCourse(null)} hw={hw} setHw={setHw} quizzes={quizzes} setQuizzes={setQuizzes} resources={resources} setResources={setResources} />
+          <CourseWorkspace course={openCourse} isTutor={isTutor} name={session.name} back={() => setOpenCourse(null)} hw={hw} setHw={setHw} quizzes={quizzes} setQuizzes={setQuizzes} resources={resources} setResources={setResources} onCourseUpdated={(c) => { setOpenCourse(c); setCourses(prev => prev.map(x => x.id === c.id ? c : x)) }} />
         ) : view === 'courses' ? (
           <>
             <h2 className="mb-6 text-4xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>My Courses</h2>
