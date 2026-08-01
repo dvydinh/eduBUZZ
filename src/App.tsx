@@ -32,6 +32,10 @@ import {
   Maximize2,
   Minimize2,
   PenTool,
+  PartyPopper,
+  BookOpen,
+  Folder,
+  Coffee
 } from 'lucide-react'
 import { useBee } from './useBee'
 import { getSocket, api } from './api'
@@ -1217,7 +1221,7 @@ function FlashcardStudy({ deckId, deckName, onBack }: { deckId: number; deckName
     return (
       <Card>
         <div className="text-center">
-          <div className="mb-4 text-6xl">🎉</div>
+          <div className="mb-4 flex justify-center text-[var(--honey-deep)]"><PartyPopper size={64} /></div>
           <h3 className="mb-2 text-3xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Session Complete!</h3>
           <p className="mb-6 font-bold" style={{ color: 'var(--ink-soft)' }}>
             You reviewed {cards.length} cards
@@ -1485,7 +1489,7 @@ function Flashcards({ isTutor, courseId }: { isTutor: boolean; courseId: string 
         ))}
         {decks.length === 0 && (
           <div className="col-span-full py-12 text-center">
-            <div className="mb-4 text-5xl">📚</div>
+            <div className="mb-4 flex justify-center text-[var(--ink-soft)]"><BookOpen size={56} /></div>
             <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>No flashcard decks yet. Create one to start studying!</p>
           </div>
         )}
@@ -1785,7 +1789,7 @@ function Schedule({ courses, hw, quizzes, reminders, setReminders }: { courses: 
           <h3 className="text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>Upcoming</h3>
         </div>
         <div className="space-y-3">
-          {deadlines.length === 0 && <p className="font-bold" style={{ color: 'var(--ink-soft)' }}>Nothing scheduled 🎉</p>}
+          {deadlines.length === 0 && <p className="flex items-center gap-2 font-bold" style={{ color: 'var(--ink-soft)' }}>Nothing scheduled <Coffee size={18} /></p>}
           {deadlines.map((d, i) => (
             <div key={i} className="flex items-center gap-3 rounded-2xl px-4 py-3" style={{ background: 'var(--bg-soft)' }}>
               <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl" style={{ background: d.tone, border: '2px solid #4a3b12' }}>
@@ -1822,8 +1826,8 @@ function MyResources() {
     <div className="space-y-8">
       {/* My uploaded resources */}
       <div>
-        <h3 className="mb-4 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <span className="mr-2">📁</span>My Uploaded Files
+        <h3 className="mb-4 flex items-center gap-2 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          <Folder size={24} color="var(--honey-deep)" />My Uploaded Files
         </h3>
         {data.resources.length === 0 ? (
           <Card><p className="font-bold" style={{ color: 'var(--ink-soft)' }}>You haven't uploaded any files yet.</p></Card>
@@ -1853,8 +1857,8 @@ function MyResources() {
 
       {/* My flashcard decks */}
       <div>
-        <h3 className="mb-4 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <span className="mr-2">📚</span>My Flashcard Decks
+        <h3 className="mb-4 flex items-center gap-2 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          <BookOpen size={24} color="var(--honey-deep)" />My Flashcard Decks
         </h3>
         {data.decks.length === 0 ? (
           <Card><p className="font-bold" style={{ color: 'var(--ink-soft)' }}>You haven't created any flashcard decks yet.</p></Card>
